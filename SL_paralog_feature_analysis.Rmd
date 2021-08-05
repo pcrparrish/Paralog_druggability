@@ -1,0 +1,535 @@
+---
+title: "SL_paralog_feature_analysis"
+author: "Phoebe Parrish"
+date: "2021-07-30"
+output: html_document
+---
+
+## Setup
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(biomaRt)
+library(depmap)
+library(ExperimentHub)
+library(ggrepel)
+
+```
+
+
+### Assign variables
+```{r}
+
+date <- Sys.Date()
+
+base_dir <- file.path("/Users", "pparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
+                      "01_Data", "Paralog_SL_meta_analysis")
+
+in_dir <- file.path(base_dir, "01_input_files")
+
+out_dir <- file.path(base_dir, "02_output_files")
+
+
+```
+
+
+### Import files
+
+```{r}
+
+d.DeKegel <- read_csv(file.path(in_dir, "DeKegel_Table_S8.csv"))
+
+d.Parrish <- read_rds(file.path(in_dir, "d.PC9_v_HeLa_paralog_target_GI_wide_flag"))
+
+d.Dede <- read_tsv(file.path(in_dir, "Dede_Table_S2.txt"))
+
+d.druggable <- read_tsv(file.path(in_dir, "finan_druggability_with_ensembl_id.txt"))
+
+```
+
+## Analysis
+
+### Get Ensembl IDs and merge
+
+```{r}
+
+d.DeKegel <- d.DeKegel %>%
+  unite(ensembl_pair, c(A1_ensembl, A2_ensembl), sep = "_", remove = FALSE) 
+
+d.Parrish <- d.Parrish %>%
+  rename(ensembl_pair_1 = ensembl_paralog_pair) %>%
+  unite(ensembl_pair_2, c(target2_ensembl_id, target1_ensembl_id), sep = "_", remove = FALSE)
+
+```
+
+```{r}
+
+# d.Dede %>%
+#   separate(gene_pair, c("gene1", "gene2"), sep = "_") %>%
+  
+
+```
+
+
+```{r}
+
+d.Parrish_DeKegel_1 <- inner_join(d.Parrish, d.DeKegel, by = c("ensembl_pair_1" = "ensembl_pair"))
+d.Parrish_DeKegel_1
+
+d.Parrish_DeKegel_2 <- inner_join(d.Parrish, d.DeKegel, by = c("ensembl_pair_2" = "ensembl_pair"))
+d.Parrish_DeKegel_2
+
+d.Parrish_DeKegel <- bind_rows(d.Parrish_DeKegel_1, d.Parrish_DeKegel_2)
+d.Parrish_DeKegel
+
+```
+
+### Parrish vs. De Kegel
+
+```{r}
+
+d.Parrish_DeKegel
+
+d.Parrish_DeKegel %>%
+  filter(PC9_SL_flag == "SL_in_PC9") %>%
+  ggplot(aes(x = PC9_gene_gene_GI_score, y = prediction_percentile)) +
+  geom_point()
+
+d.Parrish_DeKegel %>%
+  filter(broad_SL_flag == "SL_in_both") %>%
+  ggplot(aes(x = PC9_gene_gene_GI_score, y = prediction_percentile)) +
+  geom_point() +
+  geom_text_repel(aes(label = paralog_pair), segment.size = 0.2) 
+                  # nudge_x = 500, force = 0.015, direction = "y", size = 2)
+
+d.Parrish_DeKegel %>%
+  filter(broad_SL_flag == "SL_in_both") %>%
+  rowwise() %>%
+  mutate(mean_GI_score = mean(c(PC9_gene_gene_GI_score, HeLa_gene_gene_GI_score))) %>%
+  ggplot(aes(x = mean_GI_score, y = prediction_percentile)) +
+  geom_point() +
+  geom_text_repel(aes(label = paralog_pair), segment.size = 0.2) 
+                  # nudge_x = 500, force = 0.015, direction = "y", size = 2)
+
+```
+
+```{r}
+
+d.Parrish_DeKegel <- d.Parrish_DeKegel %>%
+  mutate(top_5_percent_flag = ifelse(prediction_percentile < 5, TRUE, FALSE)) %>%
+  mutate(comp_validated_flag = ifelse(broad_SL_flag != "SL_in_neither" & 
+                                        top_5_percent_flag == TRUE, TRUE, FALSE)) 
+
+d.Parrish_DeKegel_high_conf <- d.Parrish_DeKegel %>%
+  filter(broader_SL_flag == "SL_in_both" & comp_validated_flag == TRUE) %>%
+  rowwise() %>%
+  mutate(mean_GI_score = mean(c(PC9_gene_gene_GI_score, HeLa_gene_gene_GI_score)))
+d.Parrish_DeKegel_high_conf
+
+d.Parrish_DeKegel_medium_conf <- d.Parrish_DeKegel %>%
+  filter(comp_validated_flag == TRUE)
+
+```
+
+
+```{r}
+
+d.Parrish_DeKegel %>%
+  mutate(family_g2 = ifelse(family_size > 2, TRUE, FALSE)) %>%
+  ggplot(aes(x = broader_SL_flag, fill = family_g2)) +
+  geom_bar(position = "fill", width = 0.75, color = "black") +
+  theme_classic() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = top_5_percent_flag)) +
+  geom_bar(position = "fill", width = 0.75, color = "black") +
+  theme_classic() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = either_in_complex)) +
+  geom_bar(position = "fill", width = 0.75, color = "black") +
+  theme_classic() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = interact)) +
+  geom_bar(position = "fill", width = 0.75, color = "black") +
+  theme_classic() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = WGD)) +
+  geom_bar(position = "fill", width = 0.75, color = "black") +
+  theme_classic() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, y = mean_age, fill = broader_SL_flag)) +
+  geom_violin(alpha = 0.75) + 
+  geom_boxplot(width = 0.1) +
+  theme_classic() +
+  theme(legend.position = "none", 
+        aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, y = cds_length_ratio, fill = broader_SL_flag)) +
+  geom_violin(alpha = 0.75) + 
+  geom_boxplot(width = 0.1) +
+  theme_classic() +
+  theme(legend.position = "none", 
+        aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+```
+
+```{r}
+
+ggplot(d.Parrish_DeKegel_high_conf, aes(x = mean_GI_score, y = fet_ppi_overlap)) + 
+  geom_point() +
+  geom_text_repel(aes(label = paralog_pair), segment.size = 0.2) +
+  theme_classic() +
+  theme(legend.position = "none", 
+        aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+```
+
+### Druggability
+
+Intersect high-confidence hits (screens + depmap predictions?) with druggability...
+```{r}
+
+d.druggable
+d.DeKegel
+
+d.tmp <- d.druggable %>%
+  dplyr::select(ensembl_gene_id, druggability_tier)
+
+d.DeKegel_drug <- left_join(d.DeKegel, d.tmp, by = c("A1_ensembl" = "ensembl_gene_id")) %>%
+  rename(A1_drug_tier = druggability_tier) %>%
+  left_join(d.tmp, by = c("A2_ensembl" = "ensembl_gene_id")) %>%
+  rename(A2_drug_tier = druggability_tier)
+d.DeKegel_drug
+
+d.DeKegel_drug <- d.DeKegel_drug %>%
+  mutate(druggable_flag = case_when(
+    is.na(A2_drug_tier) ~ FALSE,
+    is.na(A2_drug_tier) ~ FALSE,
+    TRUE ~ TRUE), 
+    top_5_percent = ifelse(prediction_percentile < 5, TRUE, FALSE)) %>%
+  mutate(top_5_SL_ge_1_screen = case_when(
+      top_5_percent == TRUE & n_screens_SL > 0 ~ TRUE,
+      TRUE ~ FALSE)) %>%
+  mutate(SL_screen_ratio = n_screens_SL / n_screens) %>%
+  mutate(top_5_SL_all_screens = case_when(
+    top_5_percent == TRUE & SL_screen_ratio == 1 ~ TRUE,
+    TRUE ~ FALSE))
+
+```
+
+```{r}
+
+## druggable & top 5th percentile
+d.DeKegel_drug %>%
+  group_by(top_5_percent, druggable_flag) %>%
+  summarize(n = n())
+
+d.DeKegel_drug %>%
+  filter(top_5_percent == TRUE) %>%
+  filter(druggable_flag == TRUE)
+
+## druggable, top 5th percentile, and SL in ≥1 screen
+d.DeKegel_drug %>%
+  group_by(top_5_SL_ge_1_screen, druggable_flag) %>%
+  summarize(n = n())
+
+d.DeKegel_drug %>%
+  filter(top_5_SL_ge_1_screen == TRUE) %>%
+  filter(druggable_flag == TRUE)
+
+## druggable, top 5th percentile, and SL in all screens 
+d.DeKegel_drug %>%
+  group_by(top_5_SL_all_screens, druggable_flag) %>%
+  summarize(n = n())
+
+d.DeKegel_drug %>%
+  filter(top_5_SL_all_screens == TRUE) %>%
+  filter(druggable_flag == TRUE)
+
+```
+
+Next, since there are not many druggable paralogs that have been SL in multiple screens, I decided to look at the proportion of overall paralogs included in the De Kegel study that were screened at all: 
+```{r}
+
+d.DeKegel %>%
+  mutate(screened_flag = ifelse(n_screens >= 1, TRUE, FALSE)) %>%
+  ggplot(aes(x = screened_flag, fill = screened_flag)) +
+  geom_bar(position = "identity", color = "black") +
+  theme_classic () + 
+  theme(aspect.ratio = 0.75, 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+d.DeKegel %>%
+  mutate(screened_flag = ifelse(n_screens >= 1, TRUE, FALSE)) %>%
+  group_by(screened_flag) %>%
+  summarize(prop_screened = (n()/nrow(d.DeKegel))) %>%
+  mutate(group_label = paste0(round(100 * prop_screened, 2), "%")) %>%
+  ungroup() %>%
+  arrange(prop_screened) %>%
+  ggplot(aes(x = "", y = prop_screened, fill = screened_flag)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar("y", start = 0) +
+  theme_void() +
+  geom_text(aes(x = 1, y = cumsum(prop_screened) - prop_screened/2, label = group_label))
+
+```
+
+### DepMap
+
+```{r}
+
+## use this the first time only
+# eh <- ExperimentHub()
+# query(eh, "depmap")
+# 
+# crispr <- eh[["EH2261"]]
+# mutationCalls <- eh[["EH3085"]]
+# metadata <- eh[["EH3086"]]
+# copyNumber <- eh[["EH2262"]]
+# expr <- eh[["EH3084"]]
+
+## read in RDS files
+crispr <- read_rds(file.path(in_dir, "depmap_crispr"))
+mutationCalls <- read_rds(file.path(in_dir, "depmap_mutationCalls"))
+metadata <- read_rds(file.path(in_dir, "depmap_metadata"))
+copyNumber <- read_rds(file.path(in_dir, "depmap_copyNumber"))
+expr <- read_rds(file.path(in_dir, "depmap_expr"))
+
+```
+
+```{r}
+
+# write_rds(crispr, file.path(in_dir, "depmap_crispr"))
+# write_rds(mutationCalls, file.path(in_dir, "depmap_mutationCalls"))
+# write_rds(metadata, file.path(in_dir, "depmap_metadata"))
+# write_rds(copyNumber, file.path(in_dir, "depmap_copyNumber"))
+# write_rds(expr, file.path(in_dir, "depmap_expr"))
+
+```
+
+#### All lineages/diseases
+```{r}
+
+gene_list <- c("CDK11A", "CDK11B", "CCNL1", "CCNL2")
+
+## lineage x expression
+metadata %>%
+  dplyr::select(depmap_id, lineage) %>%
+  dplyr::full_join(expr, by = "depmap_id") %>%
+  dplyr::filter(gene_name %in% gene_list) %>%
+  ggplot(aes(x = lineage, y = expression, fill = lineage)) + 
+  geom_boxplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none", 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~gene_name)
+
+## lineage x CN
+metadata %>%
+  dplyr::select(depmap_id, lineage) %>%
+  dplyr::full_join(copyNumber, by = "depmap_id") %>%
+  dplyr::filter(gene_name %in% gene_list) %>%
+  ggplot(aes(x = lineage, y = log_copy_number, fill = lineage)) + 
+  geom_boxplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none", 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~gene_name, scales = "free_y")
+
+## primary_disease x expression
+metadata %>%
+  dplyr::select(depmap_id, primary_disease) %>%
+  dplyr::full_join(expr, by = "depmap_id") %>%
+  dplyr::filter(gene_name %in% gene_list) %>%
+  ggplot(aes(x = primary_disease, y = expression, fill = primary_disease)) + 
+  geom_boxplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none", 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~gene_name)
+
+## primary_disease x CN
+metadata %>%
+  dplyr::select(depmap_id, primary_disease) %>%
+  dplyr::full_join(copyNumber, by = "depmap_id") %>%
+  dplyr::filter(gene_name %in% gene_list) %>%
+  ggplot(aes(x = primary_disease, y = log_copy_number, fill = primary_disease)) + 
+  geom_boxplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none", 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~gene_name, scales = "free_y")
+
+```
+
+#### Lung only
+```{r}
+
+# metadata %>%
+#   dplyr::select(depmap_id, lineage, lineage_subtype, primary_disease) %>%
+#   dplyr::full_join(expr, by = "depmap_id") %>%
+#   dplyr::filter(gene_name == "CDK11A") %>%
+#   dplyr::filter(lineage == "lung") %>%
+#   ggplot(aes(x = lineage_subtype, y = expression, fill = lineage_subtype)) +
+#   geom_boxplot() +
+#   theme_bw() +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1),
+#         legend.position = "none")
+# 
+# metadata
+# 
+# 
+# metadata %>%
+#   dplyr::select(depmap_id, lineage, lineage_subtype, primary_disease) %>%
+#   dplyr::full_join(expr, by = "depmap_id") %>%
+#   dplyr::filter(gene_name == "CDK11A") %>%
+#   dplyr::filter(lineage == "lung") %>%
+#   ggplot(aes(x = primary_disease, y = expression, fill = primary_disease)) +
+#   geom_boxplot() +
+#   theme_bw() +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1),
+#         legend.position = "none")
+
+gene_list <- c("CDK11A", "CDK11B", "CCNL1", "CCNL2")
+
+metadata %>%
+  dplyr::select(depmap_id, lineage, lineage_subtype, primary_disease) %>%
+  dplyr::full_join(expr, by = "depmap_id") %>%
+  dplyr::filter(lineage == "lung") %>%
+  dplyr::filter(gene_name %in% gene_list) %>%
+  ggplot(aes(x = lineage_subtype, y = expression, fill = lineage_subtype)) + 
+  geom_boxplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none", 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~gene_name)
+
+metadata %>%
+  dplyr::select(depmap_id, lineage, lineage_subtype) %>%
+  dplyr::full_join(copyNumber, by = "depmap_id") %>%
+  dplyr::filter(lineage == "lung") %>%
+  dplyr::filter(gene_name %in% gene_list) %>%
+  ggplot(aes(x = lineage_subtype, y = log_copy_number, fill = lineage_subtype)) + 
+  geom_boxplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none", 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~gene_name, scales = "free_y")
+
+
+```
+
+
+```{r}
+
+metadata %>%
+  dplyr::select(depmap_id, cell_line, primary_disease) %>%
+  dplyr::full_join(mutationCalls, by = "depmap_id")
+
+metadata %>%
+  dplyr::select(depmap_id, cell_line, lineage, primary_disease, subtype_disease) %>%
+  dplyr::full_join(mutationCalls, by = "depmap_id") %>%
+  dplyr::filter(gene_name %in% gene_list) %>%
+  dplyr::filter(is_deleterious == TRUE) %>%
+  dplyr::filter(lineage == "lung") %>%
+  group_by(primary_disease, gene_name) %>%
+  summarize(counts = n()) %>%
+  ggplot(aes(x = primary_disease, y = counts, fill = primary_disease)) +
+  geom_bar(stat = "identity") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none", 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~gene_name, scales = "free_y")
+
+metadata %>%
+  dplyr::select(depmap_id, cell_line, primary_disease, subtype_disease) %>%
+  dplyr::full_join(mutationCalls, by = "depmap_id") %>%
+  filter(gene_name %in% gene_list) %>%
+  filter(primary_disease == "Lung Cancer") %>%
+  filter(is_deleterious == TRUE)
+
+head(metadata)
+
+
+```
+
+```{r}
+
+
+metadata %>%
+  dplyr::select(depmap_id, cell_line, lineage, primary_disease, subtype_disease) %>%
+  dplyr::full_join(copyNumber, by = "depmap_id") %>%
+  dplyr::filter(gene_name %in% gene_list) %>%
+  dplyr::filter(log_copy_number < -1) %>%
+  filter(lineage == "lung") %>%
+  group_by(primary_disease, gene_name) %>%
+  summarize(counts = n()) %>%
+  ggplot(aes(x = primary_disease, y = counts, fill = primary_disease)) +
+  geom_bar(stat = "identity") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none", 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~gene_name, scales = "free_y")
+
+metadata %>%
+  dplyr::select(depmap_id, cell_line, lineage, primary_disease, subtype_disease) %>%
+  dplyr::full_join(copyNumber, by = "depmap_id") %>%
+  dplyr::filter(gene_name %in% gene_list) %>%
+  filter(lineage == "lung") %>%
+  dplyr::filter(log_copy_number < -1) 
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
