@@ -2,3 +2,10 @@
 .Rhistory
 .RData
 .Ruserdata
+.RDataTmp
+.DS_Store
+CCNL1-CCNL2-DE-in-A549.csv
+*.png
+# ignore all input and output files
+01_input_files/
+02_output_files/
