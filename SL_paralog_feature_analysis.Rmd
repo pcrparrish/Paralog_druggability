@@ -22,6 +22,7 @@ library(ggforce)
 library(ggsignif)
 library(RColorBrewer)
 library(ggpubr) # another way to do significance bars
+library(ggprism) # another significance bar package...
 
 ```
 
@@ -100,34 +101,6 @@ d.Parrish_DeKegel
 
 ```
 
-### Parrish vs. De Kegel
-
-```{r}
-
-d.Parrish_DeKegel
-
-d.Parrish_DeKegel %>%
-  filter(PC9_SL_flag == "SL_in_PC9") %>%
-  ggplot(aes(x = PC9_gene_gene_GI_score, y = prediction_percentile)) +
-  geom_point()
-
-d.Parrish_DeKegel %>%
-  filter(broad_SL_flag == "SL_in_both") %>%
-  ggplot(aes(x = PC9_gene_gene_GI_score, y = prediction_percentile)) +
-  geom_point() +
-  geom_text_repel(aes(label = paralog_pair), segment.size = 0.2) 
-                  # nudge_x = 500, force = 0.015, direction = "y", size = 2)
-
-d.Parrish_DeKegel %>%
-  filter(broad_SL_flag == "SL_in_both") %>%
-  rowwise() %>%
-  mutate(mean_GI_score = mean(c(PC9_gene_gene_GI_score, HeLa_gene_gene_GI_score))) %>%
-  ggplot(aes(x = mean_GI_score, y = prediction_percentile)) +
-  geom_point() +
-  geom_text_repel(aes(label = paralog_pair), segment.size = 0.2) 
-                  # nudge_x = 500, force = 0.015, direction = "y", size = 2)
-
-```
 
 ```{r}
 
@@ -146,113 +119,6 @@ d.Parrish_DeKegel_medium_conf <- d.Parrish_DeKegel %>%
   filter(comp_validated_flag == TRUE)
 
 ```
-
-
-```{r}
-
-d.Parrish_DeKegel %>%
-  mutate(family_g2 = ifelse(family_size > 2, TRUE, FALSE)) %>%
-  ggplot(aes(x = broader_SL_flag, fill = family_g2)) +
-  geom_bar(position = "fill", width = 0.75, color = "black") +
-  theme_classic(base_size = 10) +
-  theme(aspect.ratio = 0.75,
-        axis.text = element_text(color = "black"),
-        axis.ticks = element_line(color = "black"),
-        axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
-        axis.title.x = element_blank())
-# ggsave(file.path(out_dir, "pgPEN_SL_vs_family_size.pdf"),
-#        height = 3, width = 4.5, useDingbats = FALSE)
-
-```
-This analysis showed that paralogs with >1 other family-member were less likely to be called synthetic lethal in our dataset, which makes sense given how we filtered the paralogs: we did not select only duplicate genes, Alice just filtered for those with ≥50% amino acid sequence identity with only one other paralog in the genome. Therefore, paralog pairs wtih other family-members with <50% sequence identity were included in our library. 
-
-
-```{r}
-
-ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = top_5_percent_flag)) +
-  geom_bar(position = "fill", width = 0.75, color = "black") +
-  theme_classic(base_size = 10) +
-  theme(aspect.ratio = 0.75,
-        axis.text = element_text(color = "black"),
-        axis.ticks = element_line(color = "black"),
-        axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
-        axis.title.x = element_blank())
-# ggsave(file.path(out_dir, "pgPEN_SL_vs_DeKegel_top5_percent.pdf"),
-#        height = 3, width = 4.5, useDingbats = FALSE)
-
-```
-This analysis showed that our top hits from the SL screen are likely real, given that paralogs that are SL in ≥1 cell line are much more likely to be in the top 5th percentile of predicted broadly SL paralogs than those that were SL in neither cell line. 
-
-
-```{r}
-
-ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = either_in_complex)) +
-  geom_bar(position = "fill", width = 0.75, color = "black") +
-  theme_classic() +
-  theme(aspect.ratio = 0.75,
-        axis.text = element_text(color = "black"),
-        axis.ticks = element_line(color = "black"))
-
-```
-This analysis shows that paralogs that are SL in ≥1 cell line are slightly more likely to be in a complex than those that aren't. 
-
-
-```{r}
-
-ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = interact)) +
-  geom_bar(position = "fill", width = 0.75, color = "black") +
-  theme_classic() +
-  theme(aspect.ratio = 0.75,
-        axis.text = element_text(color = "black"),
-        axis.ticks = element_line(color = "black"))
-
-```
-This analysis shows that paralogs that physically interact are more likely to be SL in ≥1 cell line compared to those that were SL in neither cell line. 
-
-
-```{r}
-
-ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = WGD)) +
-  geom_bar(position = "fill", width = 0.75, color = "black") +
-  theme_classic() +
-  theme(aspect.ratio = 0.75,
-        axis.text = element_text(color = "black"),
-        axis.ticks = element_line(color = "black"))
-
-```
-This analysis shows that most of the paralogs in our library are whole genome duplicates (WGD). This was also shown in the De Kegel et al. 2021 preprint. This also shows that paralogs that were SL in both cell lines were enriched for WGD genes. 
-
-
-```{r}
-
-ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, y = mean_age, fill = broader_SL_flag)) +
-  geom_violin(alpha = 0.75) + 
-  geom_boxplot(width = 0.1) +
-  theme_classic() +
-  theme(legend.position = "none", 
-        aspect.ratio = 0.75,
-        axis.text = element_text(color = "black"),
-        axis.ticks = element_line(color = "black"))
-
-```
-This analysis shows that SL paralogs were likely to be older. This makes sense in the context of WGD genes being more likely to be SL (see De Kegel preprint, yeast papers). 
-
-
-```{r}
-
-ggplot(d.Parrish_DeKegel_high_conf, aes(x = mean_GI_score, y = fet_ppi_overlap)) + 
-  geom_point() +
-  geom_text_repel(aes(label = paralog_pair), segment.size = 0.2) +
-  theme_classic() +
-  theme(legend.position = "none", 
-        aspect.ratio = 0.75,
-        axis.text = element_text(color = "black"),
-        axis.ticks = element_line(color = "black"))
-
-```
-This analysis compares the mean GI score across PC9 and HeLa cell lines to the PPI overlap among paralog pairs. 
-
-
 
 ### Druggability
 
@@ -500,6 +366,11 @@ DeKegel_top5_genes_hgnc <- d.DeKegel %>%
 
 ###### Top 5% and druggable
 ```{r}
+
+d.DeKegel_top5_druggable <- d.DeKegel_drug %>%
+  filter(top_5_percent == TRUE) %>%
+  filter(druggable_flag == TRUE)
+d.DeKegel_top5_druggable
 
 d.DeKegel_top5_druggable <- d.DeKegel_drug %>%
   filter(top_5_percent == TRUE) %>%
@@ -1263,7 +1134,12 @@ d.DeKegel_top5_druggable_genes_depmap_cn <- d.DeKegel_top5_druggable_genes %>%
   right_join(d.tmp, by = c("entrez" = "entrez_id")) 
 d.DeKegel_top5_druggable_genes_depmap_cn
 
+
+
+
+
 ```
+
 
 
 ```{r}
@@ -1303,6 +1179,218 @@ d.drug_sens_filtered_target
 
 ```
 
+
+```{r}
+
+### Adding CN info to top 5% of SL pairs from De Kegel paper
+### Same as above 3 chunks but for all top 5% genes (no druggability filter)
+# d.DeKegel_top5_druggable
+
+d.DeKegel_top5 <- d.DeKegel %>%
+  filter(prediction_percentile < 5)
+d.DeKegel_top5
+
+d.tmp <- metadata %>%
+  ungroup() %>%
+  dplyr::select(depmap_id, stripped_cell_line_name, primary_disease,
+                subtype_disease, lineage, lineage_subtype) %>%
+  right_join(d.cn_top5_drug, by = "depmap_id") %>% # gets rid of cell lines with no CN data
+  dplyr::select(-c(cell_line, gene)) %>%
+  rename(cell_line = stripped_cell_line_name)
+d.tmp
+
+d.DeKegel_top5_genes <- d.DeKegel_top5 %>%
+  rename(A1_hgnc = A1, A2_hgnc = A2) %>%
+  pivot_longer(cols = starts_with("A"),
+               names_to = c("gene_pos", ".value"),
+               names_pattern = "A(.)_(.*)") %>%
+  dplyr::select(prediction_rank:sorted_gene_pair,
+                gene_pos:ensembl,
+                ensembl_pair:family_size)
+d.DeKegel_top5_genes
+
+
+## add cell line, CN information to top 5% predicted SL pair df
+d.DeKegel_top5_genes_depmap_cn <- d.DeKegel_top5_genes %>%
+  right_join(d.tmp, by = c("entrez" = "entrez_id")) %>%
+  rename(log_cn = log_copy_number)
+d.DeKegel_top5_genes_depmap_cn
+
+
+d.DeKegel_top5_genes_depmap_cn <- d.DeKegel_top5_genes_depmap_cn %>%
+  group_by(sorted_gene_pair, gene_name) %>%
+  mutate(cn_bin = ntile(log_cn, n = 4)) %>%
+  mutate(cn_bin = factor(cn_bin, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+d.DeKegel_top5_genes_depmap_cn
+
+
+# d.DeKegel_top5_druggable_depmap_cn
+
+## checking that it works
+# d.DeKegel_top5_genes_depmap_cn %>%
+#   filter(sorted_gene_pair == "HDAC1_HDAC2") %>%
+#   filter(cell_line == "NIHOVCAR3")
+
+## calculate CN ntiles
+
+
+```
+
+If I filter for the top 5th percentile of genes, I get 1,795 rows vs. 391 if we filter for Finan 2017 druggable *and* top 5th percentile. 
+
+
+```{r}
+
+
+## add DepMap drug sensitivity info
+
+# drug_metadata
+# d.drug_sens_filtered
+
+## expand df so each drug target is its own row
+d.drug_sens_filtered_target <- d.drug_sens_filtered %>%
+  separate_rows(target) %>%
+  dplyr::select(depmap_id, cell_line, compound, dependency, name, dose, moa, target) %>%
+  rename(compound_name = name)
+d.drug_sens_filtered_target
+
+d.DeKegel_top5_genes_depmap_cn_drug <- left_join(d.DeKegel_top5_genes_depmap_cn, 
+                                                 d.drug_sens_filtered_target,
+                                                 by = c("depmap_id" = "depmap_id", "gene_name" = "target"))
+d.DeKegel_top5_genes_depmap_cn_drug
+
+
+## CHECK THAT THIS ACTUALLY WORKED!!!!
+
+
+
+
+# d.tmp1_A1 <- d.DeKegel_top5_druggable_depmap_cn %>%
+#   # filter(sorted_gene_pair == "CDK19_CDK8") %>%
+#   unite(cell_line_gene1, c(depmap_id, A1), sep = "_", remove = FALSE) 
+# 
+# d.tmp1_A2 <- d.DeKegel_top5_druggable_depmap_cn %>%
+#   # filter(sorted_gene_pair == "CDK19_CDK8") %>%
+#   unite(cell_line_gene2, c(depmap_id, A2), sep = "_", remove = FALSE) 
+#   
+# d.tmp2 <- d.drug_sens_filtered_target %>%
+#   # filter(target == "CDK19" | target == "CDK8") %>%
+#   dplyr::select(depmap_id, cell_line, compound, dependency, compound_name, dose, moa, target) %>%
+#   unite(cell_line_gene, c(depmap_id, target), sep = "_", remove = FALSE) %>%
+#   dplyr::select(-c(depmap_id, cell_line)) #%>%
+#   # rename(compound_name = name)
+# 
+# d.DeKegel_top5_cn_drug_A1 <- left_join(d.tmp1_A1, d.tmp2, by = c("cell_line_gene1" = "cell_line_gene")) %>%
+#   filter(!is.na(dependency)) %>%
+#   unite(gene_pair_compound, c(sorted_gene_pair, compound), sep = "_", remove = FALSE) %>%
+#   dplyr::select(-cell_line_gene1) %>%
+#   ungroup() %>% ## lines below add labels for plotting
+#   unite(tmp1, c("sorted_gene_pair", "compound_name"), sep = "\n", remove = FALSE) %>%
+#   mutate(tmp2 = paste0("(", round(dose, digits = 2), " uM)")) %>%
+#   unite("gene_pair_compound_label", c("tmp1", "tmp2"), sep = " ", remove = TRUE)
+# d.DeKegel_top5_cn_drug_A1
+
+
+## pivot wider
+# d.DeKegel_top5_genes_depmap_cn %>%
+#   pivot_wider(names_from = gene_pos,
+#               names_glue = "A{gene_pos}_{.value}",
+#               values_from = c(hgnc:ensembl, log_cn, gene_name))
+
+## calculate combined CN, combined CN quartiles
+## remove duplicate rows for drugs that target both paralogs
+
+```
+
+
+
+```{r}
+
+## add drug info
+
+
+```
+
+
+```{r}
+
+## calculate ntiles
+# 
+# d.DeKegel_top5_druggable_depmap_cn <-  d.DeKegel_top5_druggable_depmap_cn %>%
+#   # filter(sorted_gene_pair == "CDK19_CDK8") %>%
+#   # unite(cell_line_gene2, c(depmap_id, A2), sep = "_", remove = FALSE) %>%
+#   group_by(sorted_gene_pair) %>%
+#   mutate(A1_cn_bin = ntile(A1_log_cn, n = 4),
+#          A2_cn_bin = ntile(A2_log_cn, n = 4)) %>%
+#   mutate(A1_cn_bin = factor(A1_cn_bin, levels = c(4, 3, 2, 1)),
+#          A2_cn_bin = factor(A2_cn_bin, levels = c(4, 3, 2, 1))) %>%
+#   dplyr::select(-c(prediction_score:top_5_percent))
+
+```
+
+
+```{r}
+
+## combine DFs 
+# 
+# d.tmp1_A1 <- d.DeKegel_top5_druggable_depmap_cn %>%
+#   # filter(sorted_gene_pair == "CDK19_CDK8") %>%
+#   unite(cell_line_gene1, c(depmap_id, A1), sep = "_", remove = FALSE) 
+# 
+# d.tmp1_A2 <- d.DeKegel_top5_druggable_depmap_cn %>%
+#   # filter(sorted_gene_pair == "CDK19_CDK8") %>%
+#   unite(cell_line_gene2, c(depmap_id, A2), sep = "_", remove = FALSE) 
+#   
+# d.tmp2 <- d.drug_sens_filtered_target %>%
+#   # filter(target == "CDK19" | target == "CDK8") %>%
+#   dplyr::select(depmap_id, cell_line, compound, dependency, compound_name, dose, moa, target) %>%
+#   unite(cell_line_gene, c(depmap_id, target), sep = "_", remove = FALSE) %>%
+#   dplyr::select(-c(depmap_id, cell_line)) #%>%
+#  # rename(compound_name = name)
+# 
+# d.DeKegel_top5_cn_drug_A1 <- left_join(d.tmp1_A1, d.tmp2, by = c("cell_line_gene1" = "cell_line_gene")) %>%
+#   filter(!is.na(dependency)) %>%
+#   unite(gene_pair_compound, c(sorted_gene_pair, compound), sep = "_", remove = FALSE) %>%
+#   dplyr::select(-cell_line_gene1) %>%
+#   ungroup() %>% ## lines below add labels for plotting
+#   unite(tmp1, c("sorted_gene_pair", "compound_name"), sep = "\n", remove = FALSE) %>%
+#   mutate(tmp2 = paste0("(", round(dose, digits = 2), " uM)")) %>%
+#   unite("gene_pair_compound_label", c("tmp1", "tmp2"), sep = " ", remove = TRUE)
+# d.DeKegel_top5_cn_drug_A1
+# 
+# d.DeKegel_top5_cn_drug_A2 <- left_join(d.tmp1_A2, d.tmp2, by = c("cell_line_gene2" = "cell_line_gene"))  %>%
+#   filter(!is.na(dependency)) %>%
+#   unite(gene_pair_compound, c(sorted_gene_pair, compound), sep = "_", remove = FALSE) %>%
+#   dplyr::select(-cell_line_gene2) %>%
+#   ungroup() %>% ## lines below add labels for plotting
+#   unite(tmp1, c("sorted_gene_pair", "compound_name"), sep = "\n", remove = FALSE) %>%
+#   mutate(tmp2 = paste0("(", round(dose, digits = 2), " uM)")) %>%
+#   unite("gene_pair_compound_label", c("tmp1", "tmp2"), sep = " ", remove = TRUE)
+# d.DeKegel_top5_cn_drug_A2
+
+
+
+```
+
+
+
+
+
+
+
+```{r}
+
+# drug_metadata
+# d.drug_sens_filtered
+# 
+# ## expand df so each drug target is its own row
+# d.drug_sens_filtered_target <- d.drug_sens_filtered %>%
+#   separate_rows(target)
+# d.drug_sens_filtered_target
+
+```
+
 ```{r}
 
 ## join drug data and CN/SL DFs
@@ -1311,75 +1399,77 @@ d.drug_sens_filtered_target
 
 ## test case using CDK8/CDK19
 
-d.test1 <- d.DeKegel_top5_druggable_depmap_cn %>%
-  filter(sorted_gene_pair == "CDK19_CDK8") %>%
-  unite(cell_line_gene2, c(depmap_id, A2), sep = "_", remove = FALSE) %>%
-  group_by(sorted_gene_pair) %>%
-  mutate(A1_cn_bin = ntile(A1_log_cn, n = 4),
-         A2_cn_bin = ntile(A2_log_cn, n = 4)) %>%
-  mutate(A1_cn_bin = factor(A1_cn_bin, levels = c(4, 3, 2, 1)),
-         A2_cn_bin = factor(A2_cn_bin, levels = c(4, 3, 2, 1)))
-  
-d.test2 <- d.drug_sens_filtered_target %>%
-  filter(target == "CDK19" | target == "CDK8") %>%
-  dplyr::select(depmap_id, cell_line, compound, dependency, name, dose, moa, target) %>%
-  unite(cell_line_gene, c(depmap_id, target), sep = "_", remove = FALSE) %>%
-  dplyr::select(-c(depmap_id, cell_line))
-
-d.test <- left_join(d.test1, d.test2, by = c("cell_line_gene2" = "cell_line_gene"))
-d.test
-
-d.test %>%
-  filter(!is.na(dependency)) %>%
-  ungroup() %>%
-  ggplot(aes(x = A1_cn_bin, y = dependency, fill = A1_cn_bin)) +
-  geom_boxplot() +
-  theme_bw() +
-  theme(aspect.ratio = 0.75,
-        axis.text = element_text(color = "black"),
-        axis.ticks = element_line(color = "black"),
-        legend.position = "none") +
-  facet_wrap(~name, scales = "free_y")
+# d.test1 <- d.DeKegel_top5_druggable_depmap_cn %>%
+#   filter(sorted_gene_pair == "CDK19_CDK8") %>%
+#   unite(cell_line_gene2, c(depmap_id, A2), sep = "_", remove = FALSE) %>%
+#   group_by(sorted_gene_pair) %>%
+#   mutate(A1_cn_bin = ntile(A1_log_cn, n = 4),
+#          A2_cn_bin = ntile(A2_log_cn, n = 4)) %>%
+#   mutate(A1_cn_bin = factor(A1_cn_bin, levels = c(4, 3, 2, 1)),
+#          A2_cn_bin = factor(A2_cn_bin, levels = c(4, 3, 2, 1)))
+#   
+# d.test2 <- d.drug_sens_filtered_target %>%
+#   filter(target == "CDK19" | target == "CDK8") %>%
+#   dplyr::select(depmap_id, cell_line, compound, dependency, name, dose, moa, target) %>%
+#   unite(cell_line_gene, c(depmap_id, target), sep = "_", remove = FALSE) %>%
+#   dplyr::select(-c(depmap_id, cell_line))
+# 
+# d.test <- left_join(d.test1, d.test2, by = c("cell_line_gene2" = "cell_line_gene"))
+# d.test
+# 
+# d.test %>%
+#   filter(!is.na(dependency)) %>%
+#   ungroup() %>%
+#   ggplot(aes(x = A1_cn_bin, y = dependency, fill = A1_cn_bin)) +
+#   geom_boxplot() +
+#   theme_bw() +
+#   theme(aspect.ratio = 0.75,
+#         axis.text = element_text(color = "black"),
+#         axis.ticks = element_line(color = "black"),
+#         legend.position = "none") +
+#   facet_wrap(~name, scales = "free_y")
 
 ```
+
+
 
 ```{r}
 
 ## test case using PAK1/PAK2
 
-d.test1 <- d.DeKegel_top5_druggable_depmap_cn %>%
-  filter(sorted_gene_pair == "PAK1_PAK2") %>%
-  unite(cell_line_gene1, c(depmap_id, A1), sep = "_", remove = FALSE) %>%
-  group_by(sorted_gene_pair) %>%
-  mutate(A1_cn_bin = ntile(A1_log_cn, n = 4),
-         A2_cn_bin = ntile(A2_log_cn, n = 4)) %>%
-  mutate(A1_cn_bin = factor(A1_cn_bin, levels = c(4, 3, 2, 1)),
-         A2_cn_bin = factor(A2_cn_bin, levels = c(4, 3, 2, 1)))
-  
-d.test2 <- d.drug_sens_filtered_target %>%
-  filter(target == "PAK1" | target == "PAK2") %>%
-  dplyr::select(depmap_id, cell_line, compound, dependency, name, moa, target) %>%
-  unite(cell_line_gene, c(depmap_id, target), sep = "_", remove = FALSE) %>%
-  dplyr::select(-c(depmap_id, cell_line))
-
-d.test <- left_join(d.test1, d.test2, by = c("cell_line_gene1" = "cell_line_gene"))
-d.test
-
-d.test %>%
-  filter(!is.na(dependency)) %>%
-  ungroup() %>%
-  ggplot(aes(x = A2_cn_bin, y = dependency, fill = A2_cn_bin)) +
-  geom_boxplot() +
-  theme_bw() +
-  theme(aspect.ratio = 0.75,
-        axis.text = element_text(color = "black"),
-        axis.ticks = element_line(color = "black"),
-        legend.position = "none") +
-  facet_wrap(~name, scales = "free_y")
-
-d.test %>%
-  filter(A2_cn_bin %in% c(1, 4)) %>%
-  summarize("pval" = wilcox.test(dependency ~ A2_cn_bin, alternative = "greater")$p.value)
+# d.test1 <- d.DeKegel_top5_druggable_depmap_cn %>%
+#   filter(sorted_gene_pair == "PAK1_PAK2") %>%
+#   unite(cell_line_gene1, c(depmap_id, A1), sep = "_", remove = FALSE) %>%
+#   group_by(sorted_gene_pair) %>%
+#   mutate(A1_cn_bin = ntile(A1_log_cn, n = 4),
+#          A2_cn_bin = ntile(A2_log_cn, n = 4)) %>%
+#   mutate(A1_cn_bin = factor(A1_cn_bin, levels = c(4, 3, 2, 1)),
+#          A2_cn_bin = factor(A2_cn_bin, levels = c(4, 3, 2, 1)))
+#   
+# d.test2 <- d.drug_sens_filtered_target %>%
+#   filter(target == "PAK1" | target == "PAK2") %>%
+#   dplyr::select(depmap_id, cell_line, compound, dependency, name, moa, target) %>%
+#   unite(cell_line_gene, c(depmap_id, target), sep = "_", remove = FALSE) %>%
+#   dplyr::select(-c(depmap_id, cell_line))
+# 
+# d.test <- left_join(d.test1, d.test2, by = c("cell_line_gene1" = "cell_line_gene"))
+# d.test
+# 
+# d.test %>%
+#   filter(!is.na(dependency)) %>%
+#   ungroup() %>%
+#   ggplot(aes(x = A2_cn_bin, y = dependency, fill = A2_cn_bin)) +
+#   geom_boxplot() +
+#   theme_bw() +
+#   theme(aspect.ratio = 0.75,
+#         axis.text = element_text(color = "black"),
+#         axis.ticks = element_line(color = "black"),
+#         legend.position = "none") +
+#   facet_wrap(~name, scales = "free_y")
+# 
+# d.test %>%
+#   filter(A2_cn_bin %in% c(1, 4)) %>%
+#   summarize("pval" = wilcox.test(dependency ~ A2_cn_bin, alternative = "greater")$p.value)
   
 ```
 ##### Make DFs
@@ -1414,10 +1504,10 @@ d.tmp1_A2 <- d.DeKegel_top5_druggable_depmap_cn %>%
   
 d.tmp2 <- d.drug_sens_filtered_target %>%
   # filter(target == "CDK19" | target == "CDK8") %>%
-  dplyr::select(depmap_id, cell_line, compound, dependency, name, dose, moa, target) %>%
+  dplyr::select(depmap_id, cell_line, compound, dependency, compound_name, dose, moa, target) %>%
   unite(cell_line_gene, c(depmap_id, target), sep = "_", remove = FALSE) %>%
-  dplyr::select(-c(depmap_id, cell_line)) %>%
-  rename(compound_name = name)
+  dplyr::select(-c(depmap_id, cell_line)) #%>%
+  # rename(compound_name = name)
 
 d.DeKegel_top5_cn_drug_A1 <- left_join(d.tmp1_A1, d.tmp2, by = c("cell_line_gene1" = "cell_line_gene")) %>%
   filter(!is.na(dependency)) %>%
@@ -1523,6 +1613,8 @@ d.DeKegel_top5_cn_drug_A1_pval %>%
 ```
 
 ###### All plots
+
+
 ```{r}
 
 ## plot all pairs, sorted by p-value
@@ -1544,7 +1636,7 @@ n_rows <- 3
 n_cols <- 3
 n_pages <- ceiling(length/(n_rows*n_cols))
 
-# pdf(file.path(out_dir, "DeKegel_top5_A2_cn_vs_A1_drug_pval_signif_fixed.pdf"))
+# pdf(file.path(out_dir, "DeKegel_top5_A2_cn_vs_A1_drug_pval_signif_fixed_noFinan.pdf"))
 # for(i in 1:n_pages){
 #   p <-  ggplot(d.DeKegel_top5_cn_drug_A1_pval_signif,
 #                aes(x = A2_cn_bin, y = dependency, fill = A2_cn_bin)) +
@@ -1774,9 +1866,10 @@ I couldn't figure out how to do a K-S test in geom_signif() so I used stat_compa
 ```{r}
 
 ## calculate ntiles for combined CN
+## updated to fix combined CN calcs 12/3
 
 d.DeKegel_top5_druggable_depmap_combined_cn <- d.DeKegel_top5_druggable_depmap_cn %>%
-  mutate(combined_log_cn = A1_log_cn + A2_log_cn) %>%
+  mutate(combined_log_cn = log2((2^A1_log_cn) + (2^A2_log_cn))) %>%
   group_by(sorted_gene_pair) %>%
   mutate(combined_cn_bin = ntile(combined_log_cn, n = 4)) %>%
   mutate(combined_cn_bin = factor(combined_cn_bin, levels = c(4, 3, 2, 1)))
@@ -1788,10 +1881,10 @@ d.DeKegel_top5_druggable_depmap_combined_cn <- d.DeKegel_top5_druggable_depmap_c
 ## add paralog pair information to drug DF
 d.drugs <- d.drug_sens_filtered_target %>%
   # filter(target == "CDK19" | target == "CDK8") %>%
-  dplyr::select(depmap_id, cell_line, compound, dependency, name, dose, moa, target) %>%
+  dplyr::select(depmap_id, cell_line, compound, dependency, compound_name, dose, moa, target) #%>%
   # unite(cell_line_gene, c(depmap_id, target), sep = "_", remove = FALSE) %>%
   # dplyr::select(-c(depmap_id, cell_line)) %>%
-  rename(compound_name = name)
+  # rename(compound_name = name)
 
 d.pairs <- d.DeKegel_top5_druggable_depmap_combined_cn %>%
   dplyr::select(sorted_gene_pair, A1, A2) %>%
@@ -1904,8 +1997,44 @@ d.fdr_vals %>%
 
 ```
 
+##### Add FDR-adjusted p-values to DF
+```{r}
+
+d.pvals_labels <- d.DeKegel_top5_combined_cn_drug_pair_pval %>%
+  distinct(sorted_gene_pair, compound, .keep_all = TRUE) %>%
+  arrange(pval) %>%
+  dplyr::select(sorted_gene_pair, compound) 
+d.pvals_labels
+
+d.fdr_vals
+
+d.fdr_vals_labeled <- d.pvals_labels %>%
+  add_column(d.fdr_vals)
+d.fdr_vals_labeled
+
+d.DeKegel_top5_combined_cn_drug_pair <- d.DeKegel_top5_combined_cn_drug_pair %>%
+  left_join(d.fdr_vals_labeled, by = c("sorted_gene_pair", "compound"))
+d.DeKegel_top5_combined_cn_drug_pair
+
+## filtered DF with just FDR < 0.1
+d.DeKegel_top5_combined_cn_drug_pair_fdr_signif <- d.DeKegel_top5_combined_cn_drug_pair %>%
+  filter(fdr < 0.1)
+
+nrow(d.DeKegel_top5_combined_cn_drug_pair_fdr_signif)
+d.DeKegel_top5_combined_cn_drug_pair_fdr_signif
+
+```
+The number of rows matches what I calculated above. 
+
 
 ##### Plot
+
+* check how many were significant before I got rid of the Finan step
+* print only statistically significant interactions (Bonferroni-corrected)
+* print stat sig + CN
+
+###### All pvals
+
 ```{r}
 
 ## plot all pairs, sorted by p-value
@@ -1927,7 +2056,7 @@ n_rows <- 3
 n_cols <- 3
 n_pages <- ceiling(length/(n_rows*n_cols))
 
-# pdf(file.path(out_dir, "DeKegel_top5_combined_cn_vs_drug_sens_WRST_pval_signif.pdf"))
+# pdf(file.path(out_dir, "DeKegel_top5_combined_cn_vs_drug_sens_WRST_pval_signif_noFinan.pdf"))
 # for(i in 1:n_pages){
 #   p <-  ggplot(d.DeKegel_top5_combined_cn_drug_pair_pval_signif,
 #                aes(x = combined_cn_bin, y = dependency, fill = combined_cn_bin)) +
@@ -1957,6 +2086,9 @@ n_pages <- ceiling(length/(n_rows*n_cols))
 ```
 Possibly an error here (the usual `Error: Cannot create zero-length unit vector ("unit" subsetting)`) — investigate!!
 
+
+###### Top pvals
+
 ```{r}
 
 ## plot all pairs, sorted by p-value
@@ -1979,7 +2111,7 @@ n_rows <- 1
 n_cols <- 1
 n_pages <- ceiling(length/(n_rows*n_cols))
 
-# pdf(file.path(out_dir, "DeKegel_top5_combined_cn_vs_drug_sens_WRST_pval_signif_plus_cn_update3.pdf"), 
+# pdf(file.path(out_dir, "DeKegel_top5_combined_cn_vs_drug_sens_WRST_pval_signif_plus_cn_update3_noFinan.pdf"),
 #     width = 4, height = 2.5)
 # for(i in 1:n_pages){
 #   p <-  ggplot(d.DeKegel_top5_combined_cn_drug_pair_pval_signif,
@@ -2027,6 +2159,90 @@ n_pages <- ceiling(length/(n_rows*n_cols))
 ```
 
 
+###### FDR signif
+
+Plotting FDR values from DF directly onto ggsignif(): 
+https://github.com/const-ae/ggsignif/issues/29
+https://cran.r-project.org/web/packages/ggsignif/ggsignif.pdf
+
+```{r}
+
+## plot all FDR < 0.1 pairs (sorted by FDR)
+## add my own labels!!
+
+d.DeKegel_top5_combined_cn_drug_pair_fdr_signif <- d.DeKegel_top5_combined_cn_drug_pair_fdr_signif %>% 
+  ungroup() %>%
+  # unite(gene_pair_compound_label, c("sorted_gene_pair", "compound_name"), sep = "\n", remove = FALSE) %>%
+  mutate("gene_pair_compound_label" = reorder(gene_pair_compound_label, fdr),
+         "sorted_gene_pair" = reorder(sorted_gene_pair, fdr))
+
+length <- d.DeKegel_top5_combined_cn_drug_pair_fdr_signif %>%
+  ungroup() %>%
+  distinct(gene_pair_compound_label) %>%
+  nrow()
+
+d.fdr_labels <- d.DeKegel_top5_combined_cn_drug_pair_fdr_signif %>%
+  ungroup() %>%
+  dplyr::select(gene_pair_compound_label, combined_cn_bin, fdr)
+  
+aspect_ratio <- 0.8
+n_rows <- 1
+n_cols <- 1
+n_pages <- ceiling(length/(n_rows*n_cols))
+
+# pdf(file.path(out_dir, "DeKegel_top5_combined_cn_vs_drug_sens_WRST_fdr_signif_plus_cn_update3_noFinan.pdf"),
+#     width = 4, height = 2.5)
+# for(i in 1:n_pages){
+#   p <-  ggplot(d.DeKegel_top5_combined_cn_drug_pair_fdr_signif,
+#                aes(x = combined_cn_bin, y = dependency, fill = combined_cn_bin)) +
+#     geom_hline(yintercept = 0) +
+#   geom_boxplot() +
+#   geom_signif(comparisons = list(c(1, 4)),
+#               map_signif_level = FALSE,
+#               test = "wilcox.test",
+#               test.args = list(alternative = "greater", p.adjust.method = "BH"),
+#               # annotations = fdr_labels, # fix this to get FDR plotted direclty
+#               textsize = 3.2) +
+#   # add_pvalue(d.fdr_labels) +
+#   ## adds 10% of space on top & bottom so p-value label will fit
+#   scale_y_continuous(expand = expansion(mult = 0.15)) +
+#   scale_fill_brewer(palette = "YlGnBu", direction = -1) +
+#     labs(x = "Combined_CN_bin",
+#          y = "LFC_treated_vs_DMSO") +
+#   theme_bw() +
+#   theme(aspect.ratio = aspect_ratio,
+#         axis.text = element_text(color = "black"),
+#         axis.ticks = element_line(color = "black"),
+#         legend.position = "none") +
+#   facet_wrap_paginate(~gene_pair_compound_label, scales = "free_y",
+#                       nrow = n_rows, ncol = n_cols, page = i)
+# 
+#   q <- ggplot(d.DeKegel_top5_combined_cn_drug_pair_fdr_signif,
+#                aes(x = combined_cn_bin, y = (2^combined_log_cn), fill = combined_cn_bin)) +
+#     geom_hline(yintercept = 4) +
+#     geom_hline(yintercept = 3, linetype = "dashed") +
+#     geom_hline(yintercept = 5, linetype = "dashed") +
+#   geom_boxplot() +
+#   ## adds 10% of space on top & bottom so p-value label will fit
+#   # scale_y_continuous(expand = expansion(mult = 0.15)) +
+#   scale_fill_brewer(palette = "YlGnBu", direction = -1) +
+#     labs(x = "Combined_CN_bin", 
+#          y = "Combined_CN") +
+#   coord_trans(y = "log2") +
+#   theme_bw() +
+#   theme(aspect.ratio = aspect_ratio,
+#         axis.text = element_text(color = "black"),
+#         axis.ticks = element_line(color = "black"),
+#         legend.position = "none") +
+#   facet_wrap_paginate(~gene_pair_compound_label, scales = "free_y",
+#                       nrow = n_rows, ncol = n_cols, page = i)
+#   print(ggarrange(p, q, ncol = 2, align = "hv"))
+# }
+# dev.off()
+
+```
+
+
 #### Lung only (comb. CN)
 ```{r}
 
@@ -2051,10 +2267,10 @@ d.DeKegel_top5_druggable_depmap_lung_combined_cn <- d.DeKegel_top5_druggable_dep
 ## add paralog pair information to drug DF
 d.drugs <- d.drug_sens_filtered_target %>%
   # filter(target == "CDK19" | target == "CDK8") %>%
-  dplyr::select(depmap_id, cell_line, compound, dependency, name, dose, moa, target) %>%
+  dplyr::select(depmap_id, cell_line, compound, dependency, compound_name, dose, moa, target) #%>%
   # unite(cell_line_gene, c(depmap_id, target), sep = "_", remove = FALSE) %>%
   # dplyr::select(-c(depmap_id, cell_line)) %>%
-  rename(compound_name = name)
+  #rename(compound_name = name)
 
 d.pairs_lung <- d.DeKegel_top5_druggable_depmap_lung_combined_cn %>%
   dplyr::select(sorted_gene_pair, A1, A2) %>%
@@ -2354,7 +2570,8 @@ d.DeKegel_top5_druggable_depmap_expr
 ## calculate ntiles for combined CN
 
 d.DeKegel_top5_druggable_depmap_combined_expr <- d.DeKegel_top5_druggable_depmap_expr %>%
-  mutate(combined_expr = A1_rna_expr + A2_rna_expr) %>%
+  # mutate(combined_expr = A1_rna_expr + A2_rna_expr) %>%
+  mutate(combined_expr = log2((2^A1_rna_expr) + (2^A2_rna_expr))) %>%
   group_by(sorted_gene_pair) %>%
   mutate(combined_expr_bin = ntile(combined_expr, n = 4)) %>%
   mutate(combined_expr_bin = factor(combined_expr_bin, levels = c(4, 3, 2, 1)))
@@ -2366,10 +2583,10 @@ d.DeKegel_top5_druggable_depmap_combined_expr <- d.DeKegel_top5_druggable_depmap
 ## add paralog pair information to drug DF
 d.drugs <- d.drug_sens_filtered_target %>%
   # filter(target == "CDK19" | target == "CDK8") %>%
-  dplyr::select(depmap_id, cell_line, compound, dependency, name, dose, moa, target) %>%
+  dplyr::select(depmap_id, cell_line, compound, dependency, compound_name, dose, moa, target)# %>%
   # unite(cell_line_gene, c(depmap_id, target), sep = "_", remove = FALSE) %>%
   # dplyr::select(-c(depmap_id, cell_line)) %>%
-  rename(compound_name = name)
+ # rename(compound_name = name)
 
 d.pairs <- d.DeKegel_top5_druggable_depmap_combined_expr %>%
   dplyr::select(sorted_gene_pair, A1, A2) %>%
@@ -2457,6 +2674,55 @@ d.DeKegel_top5_combined_expr_drug_pair_pval
 
 ```
 
+##### Add FDR-adjusted p-values to DF
+
+```{r}
+
+pvals <- d.DeKegel_top5_combined_expr_drug_pair_pval %>%
+  distinct(sorted_gene_pair, compound, .keep_all = TRUE) %>%
+  arrange(pval) %>%
+  dplyr::select(pval) %>%
+  pull()
+
+fdr_vals <- p.adjust(pvals, method = "BH")
+head(fdr_vals)
+
+d.fdr_vals <- tibble(fdr = fdr_vals)
+
+d.fdr_vals %>%
+  filter(fdr < 0.05) %>%
+  nrow()
+
+d.fdr_vals %>%
+  filter(fdr < 0.1) %>%
+  nrow()
+
+d.pvals_labels <- d.DeKegel_top5_combined_expr_drug_pair_pval %>%
+  distinct(sorted_gene_pair, compound, .keep_all = TRUE) %>%
+  arrange(pval) %>%
+  dplyr::select(sorted_gene_pair, compound) 
+d.pvals_labels
+
+d.fdr_vals
+
+d.fdr_vals_labeled <- d.pvals_labels %>%
+  add_column(d.fdr_vals)
+d.fdr_vals_labeled
+
+d.DeKegel_top5_combined_expr_drug_pair <- d.DeKegel_top5_combined_expr_drug_pair %>%
+  left_join(d.fdr_vals_labeled, by = c("sorted_gene_pair", "compound"))
+d.DeKegel_top5_combined_expr_drug_pair
+
+## filtered DF with just FDR < 0.1
+d.DeKegel_top5_combined_expr_drug_pair_fdr_signif <- d.DeKegel_top5_combined_expr_drug_pair %>%
+  filter(fdr < 0.1)
+
+nrow(d.DeKegel_top5_combined_expr_drug_pair_fdr_signif)
+d.DeKegel_top5_combined_expr_drug_pair_fdr_signif
+
+```
+
+
 ##### Plot
 ```{r}
 
@@ -2516,10 +2782,10 @@ d.DeKegel_top5_combined_expr_drug_pair_pval <- d.DeKegel_top5_combined_expr_drug
   mutate("gene_pair_compound_label" = reorder(gene_pair_compound_label, pval),
          "sorted_gene_pair" = reorder(sorted_gene_pair, pval))
 
-d.DeKegel_top5_combined_cn_drug_pair_pval_signif <- d.DeKegel_top5_combined_cn_drug_pair_pval %>% 
+d.DeKegel_top5_combined_expr_drug_pair_pval_signif <- d.DeKegel_top5_combined_expr_drug_pair_pval %>% 
   filter(pval <= 0.005)
 
-length <- d.DeKegel_top5_combined_cn_drug_pair_pval_signif %>%
+length <- d.DeKegel_top5_combined_expr_drug_pair_pval_signif %>%
   ungroup() %>%
   distinct(gene_pair_compound_label) %>%
   nrow()
@@ -2529,49 +2795,119 @@ n_rows <- 1
 n_cols <- 1
 n_pages <- ceiling(length/(n_rows*n_cols))
 
-pdf(file.path(out_dir, "DeKegel_top5_combined_expr_vs_drug_sens_WRST_pval_signif_plus_expr_pL0.005.pdf"),
-    width = 4, height = 2.5)
-for(i in 1:n_pages){
-  p <-  ggplot(d.DeKegel_top5_combined_expr_drug_pair_pval_signif,
-               aes(x = combined_expr_bin, y = dependency, fill = combined_expr_bin)) +
-    geom_hline(yintercept = 0) +
-  geom_boxplot() +
-  geom_signif(comparisons = list(c(1, 4)),
-              map_signif_level = FALSE,
-              test = "wilcox.test",
-              test.args = list(alternative = "greater"),
-              textsize = 3.2) +
-  ## adds 10% of space on top & bottom so p-value label will fit
-  scale_y_continuous(expand = expansion(mult = 0.15)) +
-  scale_fill_brewer(palette = "YlGnBu", direction = -1) +
-    labs(y = "LFC_treated_vs_DMSO") +
-  theme_bw() +
-  theme(aspect.ratio = aspect_ratio,
-        axis.text = element_text(color = "black"),
-        axis.ticks = element_line(color = "black"),
-        legend.position = "none") +
-  facet_wrap_paginate(~gene_pair_compound_label, scales = "free_y",
-                      nrow = n_rows, ncol = n_cols, page = i)
-
-  q <- ggplot(d.DeKegel_top5_combined_expr_drug_pair_pval_signif,
-               aes(x = combined_expr_bin, y = combined_expr, fill = combined_expr_bin)) +
-  geom_boxplot() +
-  ## adds 10% of space on top & bottom so p-value label will fit
-  # scale_y_continuous(expand = expansion(mult = 0.15)) +
-  scale_fill_brewer(palette = "YlGnBu", direction = -1) +
-    labs(y = "combined_expression") +
-  theme_bw() +
-  theme(aspect.ratio = aspect_ratio,
-        axis.text = element_text(color = "black"),
-        axis.ticks = element_line(color = "black"),
-        legend.position = "none") +
-  facet_wrap_paginate(~gene_pair_compound_label, scales = "free_y",
-                      nrow = n_rows, ncol = n_cols, page = i)
-  print(ggarrange(p, q, ncol = 2, align = "hv"))
-}
-dev.off()
+# pdf(file.path(out_dir, "DeKegel_top5_combined_expr_fixed_vs_drug_sens_WRST_pval_signif_plus_expr_pL0.005.pdf"),
+#     width = 4, height = 2.5)
+# for(i in 1:n_pages){
+#   p <-  ggplot(d.DeKegel_top5_combined_expr_drug_pair_pval_signif,
+#                aes(x = combined_expr_bin, y = dependency, fill = combined_expr_bin)) +
+#     geom_hline(yintercept = 0) +
+#   geom_boxplot() +
+#   geom_signif(comparisons = list(c(1, 4)),
+#               map_signif_level = FALSE,
+#               test = "wilcox.test",
+#               test.args = list(alternative = "greater"),
+#               textsize = 3.2) +
+#   ## adds 10% of space on top & bottom so p-value label will fit
+#   scale_y_continuous(expand = expansion(mult = 0.15)) +
+#   scale_fill_brewer(palette = "YlGnBu", direction = -1) +
+#     labs(x = "Combined_expr_bin",
+#          y = "LFC_treated_vs_DMSO") +
+#   theme_bw() +
+#   theme(aspect.ratio = aspect_ratio,
+#         axis.text = element_text(color = "black"),
+#         axis.ticks = element_line(color = "black"),
+#         legend.position = "none") +
+#   facet_wrap_paginate(~gene_pair_compound_label, scales = "free_y",
+#                       nrow = n_rows, ncol = n_cols, page = i)
+# 
+#   q <- ggplot(d.DeKegel_top5_combined_expr_drug_pair_pval_signif,
+#                aes(x = combined_expr_bin, y = combined_expr, fill = combined_expr_bin)) +
+#   geom_boxplot() +
+#   ## adds 10% of space on top & bottom so p-value label will fit
+#   # scale_y_continuous(expand = expansion(mult = 0.15)) +
+#   scale_fill_brewer(palette = "YlGnBu", direction = -1) +
+#     labs(x = "Combined_expr_bin", 
+#          y = "Combined_expression") +
+#   theme_bw() +
+#   theme(aspect.ratio = aspect_ratio,
+#         axis.text = element_text(color = "black"),
+#         axis.ticks = element_line(color = "black"),
+#         legend.position = "none") +
+#   facet_wrap_paginate(~gene_pair_compound_label, scales = "free_y",
+#                       nrow = n_rows, ncol = n_cols, page = i)
+#   print(ggarrange(p, q, ncol = 2, align = "hv"))
+# }
+# dev.off()
 
 ```
+
+
+```{r}
+
+## plot all pairs, sorted by p-value
+d.DeKegel_top5_combined_expr_drug_pair_fdr_signif <- d.DeKegel_top5_combined_expr_drug_pair_fdr_signif %>% 
+  ungroup() %>%
+  # unite(gene_pair_compound_label, c("sorted_gene_pair", "compound_name"), sep = "\n", remove = FALSE) %>%
+  mutate("gene_pair_compound_label" = reorder(gene_pair_compound_label, fdr),
+         "sorted_gene_pair" = reorder(sorted_gene_pair, fdr))
+
+length <- d.DeKegel_top5_combined_expr_drug_pair_fdr_signif %>%
+  ungroup() %>%
+  distinct(gene_pair_compound_label) %>%
+  nrow()
+  
+aspect_ratio <- 0.8
+n_rows <- 1
+n_cols <- 1
+n_pages <- ceiling(length/(n_rows*n_cols))
+
+# pdf(file.path(out_dir, "DeKegel_top5_combined_expr_fixed_vs_drug_sens_WRST_pval_signif_plus_expr_fdrL0.1.pdf"),
+#     width = 4, height = 2.5)
+# for(i in 1:n_pages){
+#   p <-  ggplot(d.DeKegel_top5_combined_expr_drug_pair_fdr_signif,
+#                aes(x = combined_expr_bin, y = dependency, fill = combined_expr_bin)) +
+#     geom_hline(yintercept = 0) +
+#   geom_boxplot() +
+#   geom_signif(comparisons = list(c(1, 4)),
+#               map_signif_level = FALSE,
+#               test = "wilcox.test",
+#               test.args = list(alternative = "greater"),
+#               textsize = 3.2) +
+#   ## adds 10% of space on top & bottom so p-value label will fit
+#   scale_y_continuous(expand = expansion(mult = 0.15)) +
+#   scale_fill_brewer(palette = "YlGnBu", direction = -1) +
+#     labs(x = "Combined_expr_bin",
+#          y = "LFC_treated_vs_DMSO") +
+#   theme_bw() +
+#   theme(aspect.ratio = aspect_ratio,
+#         axis.text = element_text(color = "black"),
+#         axis.ticks = element_line(color = "black"),
+#         legend.position = "none") +
+#   facet_wrap_paginate(~gene_pair_compound_label, scales = "free_y",
+#                       nrow = n_rows, ncol = n_cols, page = i)
+# 
+#   q <- ggplot(d.DeKegel_top5_combined_expr_drug_pair_fdr_signif,
+#                aes(x = combined_expr_bin, y = combined_expr, fill = combined_expr_bin)) +
+#   geom_boxplot() +
+#   ## adds 10% of space on top & bottom so p-value label will fit
+#   # scale_y_continuous(expand = expansion(mult = 0.15)) +
+#   scale_fill_brewer(palette = "YlGnBu", direction = -1) +
+#     labs(x = "Combined_expr_bin", 
+#          y = "Combined_expression") +
+#   theme_bw() +
+#   theme(aspect.ratio = aspect_ratio,
+#         axis.text = element_text(color = "black"),
+#         axis.ticks = element_line(color = "black"),
+#         legend.position = "none") +
+#   facet_wrap_paginate(~gene_pair_compound_label, scales = "free_y",
+#                       nrow = n_rows, ncol = n_cols, page = i)
+#   print(ggarrange(p, q, ncol = 2, align = "hv"))
+# }
+# dev.off()
+
+```
+
+
 
 
 
@@ -2594,10 +2930,10 @@ d.DeKegel_top5_druggable_depmap_lung_combined_expr <- d.DeKegel_top5_druggable_d
 ## add paralog pair information to drug DF
 d.drugs <- d.drug_sens_filtered_target %>%
   # filter(target == "CDK19" | target == "CDK8") %>%
-  dplyr::select(depmap_id, cell_line, compound, dependency, name, dose, moa, target) %>%
+  dplyr::select(depmap_id, cell_line, compound, dependency, compound_name, dose, moa, target) #%>%
   # unite(cell_line_gene, c(depmap_id, target), sep = "_", remove = FALSE) %>%
   # dplyr::select(-c(depmap_id, cell_line)) %>%
-  rename(compound_name = name)
+  #rename(compound_name = name)
 
 d.pairs_lung <- d.DeKegel_top5_druggable_depmap_lung_combined_expr %>%
   dplyr::select(sorted_gene_pair, A1, A2) %>%
@@ -2730,6 +3066,73 @@ n_pages <- ceiling(length/(n_rows*n_cols))
 
 ```
 
+
+### Combined CN vs. expression
+
+```{r}
+
+d.DeKegel_top5_combined_cn_drug_pair_pval
+
+d.DeKegel_top5_combined_expr_drug_pair_pval
+
+# d.cn_vs_expr <- inner_join(d.DeKegel_top5_combined_cn_drug_pair_pval, 
+#                           d.DeKegel_top5_combined_expr_drug_pair_pval, 
+#                           by = c("sorted_gene_pair", "depmap_id")) %>%
+#   filter(!is.na(combined_cn)) %>%
+#   filter(!is.na(combined_expr))
+# d.cn_vs_expr
+
+d.tmp1 <- d.DeKegel_top5_combined_cn_drug_pair_pval %>%
+  dplyr::select(depmap_id, sorted_gene_pair, combined_log_cn) 
+
+d.tmp2 <- d.DeKegel_top5_combined_expr_drug_pair_pval %>%
+  dplyr::select(depmap_id, sorted_gene_pair, combined_expr)
+
+d.tmp3 <- inner_join(d.tmp1, d.tmp2, by = c("depmap_id", "sorted_gene_pair")) %>%
+  drop_na()
+d.tmp3
+
+```
+
+```{r}
+
+d.tmp3 %>%
+  filter(sorted_gene_pair == "HDAC1_HDAC2") %>%
+  ggplot(aes(x = combined_log_cn, y = combined_expr)) +
+  geom_point() +
+  facet_wrap(~sorted_gene_pair)
+
+```
+
+```{r}
+
+length <- d.tmp3 %>%
+  ungroup() %>%
+  distinct(sorted_gene_pair) %>%
+  nrow()
+  
+aspect_ratio <- 1
+n_rows <- 1
+n_cols <- 1
+n_pages <- ceiling(length/(n_rows*n_cols))
+
+pdf(file.path(out_dir, "DeKegel_top5_combined_expr_vs_combined_cn.pdf"),
+    width = 4, height = 2.5)
+for(i in 1:n_pages){
+  p <-  ggplot(d.tmp3, aes(x = combined_log_cn, y = combined_expr)) +
+  geom_point() +
+  theme_bw() +
+  theme(aspect.ratio = aspect_ratio,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap_paginate(~sorted_gene_pair, scales = "free",
+                      nrow = n_rows, ncol = n_cols, page = i)
+    print(ggarrange(p, ncol = 1))
+}
+dev.off()
+
+```
 
 ### Quartiles vs. CN/expr
 ```{r}
