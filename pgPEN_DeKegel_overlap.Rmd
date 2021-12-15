@@ -1,0 +1,266 @@
+---
+title: "pgPEN_DeKegel_overlap"
+author: "Phoebe Parrish"
+date: "10/21/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+## Setup
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(ggrepel)
+library(RColorBrewer)
+library(ggpubr) # another way to do significance bars
+
+```
+
+
+### Assign variables
+```{r}
+
+date <- Sys.Date()
+
+## work laptop
+base_dir <- file.path("/Users", "pparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
+                      "01_Data", "Paralog_SL_meta_analysis")
+
+## personal laptop
+# base_dir <- file.path("/Users", "phoebeparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
+#                       "01_Data", "Paralog_SL_meta_analysis")
+
+in_dir <- file.path(base_dir, "01_input_files")
+
+out_dir <- file.path(base_dir, "02_output_files")
+
+
+```
+
+
+### Import files
+
+```{r}
+
+d.DeKegel <- read_csv(file.path(in_dir, "DeKegel_Table_S8.csv"))
+
+d.Parrish <- read_rds(file.path(in_dir, "d.PC9_v_HeLa_paralog_target_GI_wide_flag"))
+
+d.Dede <- read_tsv(file.path(in_dir, "Dede_Table_S2.txt"))
+
+d.druggable <- read_tsv(file.path(in_dir, "finan_druggability_with_ensembl_id.txt"))
+
+d.Broad_drug_info <- read_csv(file.path(in_dir, "primary-screen-replicate-collapsed-treatment-info.csv"))
+
+```
+
+## Analysis
+
+### Get Ensembl IDs and merge
+
+```{r}
+
+d.DeKegel <- d.DeKegel %>%
+  unite(ensembl_pair, c(A1_ensembl, A2_ensembl), sep = "_", remove = FALSE) 
+
+d.Parrish <- d.Parrish %>%
+  rename(ensembl_pair_1 = ensembl_paralog_pair) %>%
+  unite(ensembl_pair_2, c(target2_ensembl_id, target1_ensembl_id), sep = "_", remove = FALSE)
+
+```
+
+```{r}
+
+# d.Dede %>%
+#   separate(gene_pair, c("gene1", "gene2"), sep = "_") %>%
+  
+
+```
+
+
+```{r}
+
+d.Parrish_DeKegel_1 <- inner_join(d.Parrish, d.DeKegel, by = c("ensembl_pair_1" = "ensembl_pair"))
+d.Parrish_DeKegel_1
+
+d.Parrish_DeKegel_2 <- inner_join(d.Parrish, d.DeKegel, by = c("ensembl_pair_2" = "ensembl_pair"))
+d.Parrish_DeKegel_2
+
+d.Parrish_DeKegel <- bind_rows(d.Parrish_DeKegel_1, d.Parrish_DeKegel_2)
+d.Parrish_DeKegel
+
+```
+
+### Parrish vs. De Kegel
+
+```{r}
+
+d.Parrish_DeKegel
+
+d.Parrish_DeKegel %>%
+  filter(PC9_SL_flag == "SL_in_PC9") %>%
+  ggplot(aes(x = PC9_gene_gene_GI_score, y = prediction_percentile)) +
+  geom_point()
+
+d.Parrish_DeKegel %>%
+  filter(broad_SL_flag == "SL_in_both") %>%
+  ggplot(aes(x = PC9_gene_gene_GI_score, y = prediction_percentile)) +
+  geom_point() +
+  geom_text_repel(aes(label = paralog_pair), segment.size = 0.2) 
+                  # nudge_x = 500, force = 0.015, direction = "y", size = 2)
+
+d.Parrish_DeKegel %>%
+  filter(broad_SL_flag == "SL_in_both") %>%
+  rowwise() %>%
+  mutate(mean_GI_score = mean(c(PC9_gene_gene_GI_score, HeLa_gene_gene_GI_score))) %>%
+  ggplot(aes(x = mean_GI_score, y = prediction_percentile)) +
+  geom_point() +
+  geom_text_repel(aes(label = paralog_pair), segment.size = 0.2) 
+                  # nudge_x = 500, force = 0.015, direction = "y", size = 2)
+
+```
+
+```{r}
+
+d.Parrish_DeKegel <- d.Parrish_DeKegel %>%
+  mutate(top_5_percent_flag = ifelse(prediction_percentile < 5, TRUE, FALSE)) %>%
+  mutate(comp_validated_flag = ifelse(broad_SL_flag != "SL_in_neither" & 
+                                        top_5_percent_flag == TRUE, TRUE, FALSE)) 
+
+d.Parrish_DeKegel_high_conf <- d.Parrish_DeKegel %>%
+  filter(broader_SL_flag == "SL_in_both" & comp_validated_flag == TRUE) %>%
+  rowwise() %>%
+  mutate(mean_GI_score = mean(c(PC9_gene_gene_GI_score, HeLa_gene_gene_GI_score)))
+d.Parrish_DeKegel_high_conf
+
+d.Parrish_DeKegel_medium_conf <- d.Parrish_DeKegel %>%
+  filter(comp_validated_flag == TRUE)
+
+```
+
+```{r}
+
+d.Parrish_DeKegel %>%
+  filter(broad_SL_flag != "SL_in_neither") %>%
+  filter(top_5_percent_flag == TRUE) 
+
+d.Parrish_DeKegel %>%
+  filter(broad_SL_flag != "SL_in_neither") %>%
+  filter(top_5_percent_flag == TRUE) %>%
+  filter(n_screens_SL > 2)
+
+```
+
+
+```{r}
+
+d.Parrish_DeKegel %>%
+  mutate(family_g2 = ifelse(family_size > 2, TRUE, FALSE)) %>%
+  ggplot(aes(x = broader_SL_flag, fill = family_g2)) +
+  geom_bar(position = "fill", width = 0.75, color = "black") +
+  theme_classic(base_size = 10) +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+        axis.title.x = element_blank())
+# ggsave(file.path(out_dir, "pgPEN_SL_vs_family_size.pdf"),
+#        height = 3, width = 4.5, useDingbats = FALSE)
+
+```
+
+This analysis showed that paralogs with >1 other family-member were less likely to be called synthetic lethal in our dataset, which makes sense given how we filtered the paralogs: we did not select only duplicate genes, Alice just filtered for those with ≥50% amino acid sequence identity with only one other paralog in the genome. Therefore, paralog pairs wtih other family-members with <50% sequence identity were included in our library. 
+
+
+```{r}
+
+ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = top_5_percent_flag)) +
+  geom_bar(position = "fill", width = 0.75, color = "black") +
+  theme_classic(base_size = 10) +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+        axis.title.x = element_blank())
+# ggsave(file.path(out_dir, "pgPEN_SL_vs_DeKegel_top5_percent.pdf"),
+#        height = 3, width = 4.5, useDingbats = FALSE)
+
+```
+
+This analysis showed that our top hits from the SL screen are likely real, given that paralogs that are SL in ≥1 cell line are much more likely to be in the top 5th percentile of predicted broadly SL paralogs than those that were SL in neither cell line. 
+
+
+```{r}
+
+ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = either_in_complex)) +
+  geom_bar(position = "fill", width = 0.75, color = "black") +
+  theme_classic() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+```
+
+This analysis shows that paralogs that are SL in ≥1 cell line are slightly more likely to be in a complex than those that aren't. 
+
+
+```{r}
+
+ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = interact)) +
+  geom_bar(position = "fill", width = 0.75, color = "black") +
+  theme_classic() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+```
+
+This analysis shows that paralogs that physically interact are more likely to be SL in ≥1 cell line compared to those that were SL in neither cell line. 
+
+
+```{r}
+
+ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = WGD)) +
+  geom_bar(position = "fill", width = 0.75, color = "black") +
+  theme_classic() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+```
+
+This analysis shows that most of the paralogs in our library are whole genome duplicates (WGD). This was also shown in the De Kegel et al. 2021 preprint. This also shows that paralogs that were SL in both cell lines were enriched for WGD genes. 
+
+
+```{r}
+
+ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, y = mean_age, fill = broader_SL_flag)) +
+  geom_violin(alpha = 0.75) + 
+  geom_boxplot(width = 0.1) +
+  theme_classic() +
+  theme(legend.position = "none", 
+        aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+```
+
+This analysis shows that SL paralogs were likely to be older. This makes sense in the context of WGD genes being more likely to be SL (see De Kegel preprint, yeast papers). 
+
+
+```{r}
+
+ggplot(d.Parrish_DeKegel_high_conf, aes(x = mean_GI_score, y = fet_ppi_overlap)) + 
+  geom_point() +
+  geom_text_repel(aes(label = paralog_pair), segment.size = 0.2) +
+  theme_classic() +
+  theme(legend.position = "none", 
+        aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+```
+
+This analysis compares the mean GI score across PC9 and HeLa cell lines to the PPI overlap among paralog pairs. 

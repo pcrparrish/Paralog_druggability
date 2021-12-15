@@ -1,0 +1,77 @@
+---
+title: "Plotting PRISM Phase 2 dose response curves"
+author: "Phoebe Parrish"
+date: "12/13/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+
+## work laptop
+base_dir <- file.path("/Users", "pparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
+                      "01_Data", "Paralog_SL_meta_analysis")
+
+## personal laptop
+# base_dir <- file.path("/Users", "phoebeparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
+#                       "01_Data", "Paralog_SL_meta_analysis")
+
+in_dir <- file.path(base_dir, "01_input_files")
+
+out_dir <- file.path(base_dir, "02_output_files")
+
+d.Broad_secondary_doses <- read_csv(file.path(in_dir, "secondary-screen-replicate-collapsed-logfold-change_bosutinib.csv"))
+
+d.Phase1_significant_Phase2 <- read_rds(file.path(out_dir, "d.DeKegel_top5_depmap_combined_expr_phase2_drug_pval_fdr_signif_phase1"))
+
+```
+
+
+```{r}
+
+d.Broad_secondary_doses
+
+d.Phase1_significant_Phase2 %>%
+  filter(sorted_gene_pair == "ABL1_ABL2") %>%
+  filter(compound_name == "bosutinib")
+
+d.new <- left_join(d.Phase1_significant_Phase2, 
+                   d.Broad_secondary_doses, 
+                   by = c("depmap_id")) %>%
+  pivot_longer("BRD-K99964838-001-11-9::0.00061034::HTS002":"BRD-K99964838-001-11-9::2.5::HTS002",
+               names_to = "compound_dose", 
+               values_to = "rep_collapsed_LFC")
+
+```
+
+```{r}
+
+d.new <- d.new  %>%
+  separate(col = compound_dose, into = c("id_rm", "dose", "screen_rm"), sep = "::", remove = FALSE) %>%
+  dplyr::select(-c("id_rm", "screen_rm")) %>%
+  filter(!is.na(rep_collapsed_LFC)) 
+d.new
+
+```
+
+```{r}
+
+d.new  %>%
+  mutate("dose" = as.numeric(dose)) %>%
+  group_by(combined_expr_bin, dose) %>%
+  summarize(median_lfc = median(rep_collapsed_LFC)) %>%
+  ggplot(aes(x = log2(dose), y = median_lfc, color = combined_expr_bin)) +
+  geom_point() +
+  geom_line()
+
+
+# ggplot(d.new, aes(x = ))
+
+
+```
+
+
+
+
+
