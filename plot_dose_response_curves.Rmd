@@ -1,0 +1,295 @@
+---
+title: "Plotting PRISM Phase 2 dose response curves"
+author: "Phoebe Parrish"
+date: "12/13/2021"
+output: html_document
+---
+
+## Setup
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(RColorBrewer)
+
+## set up file paths
+base_dir <- file.path("/Users", "pparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
+                      "01_Data", "Paralog_SL_meta_analysis")
+
+in_dir <- file.path(base_dir, "01_input_files")
+
+out_dir <- file.path(base_dir, "02_output_files")
+
+
+## bosutinib + ABL1/2 only
+d.Broad_secondary_doses <- read_csv(file.path(in_dir, "secondary-screen-replicate-collapsed-logfold-change_bosutinib.csv"))
+
+d.Phase1_significant_Phase2 <- read_rds(file.path(out_dir, "d.DeKegel_top5_depmap_combined_expr_phase2_drug_pval_fdr_signif_phase1"))
+
+
+## all top pair + drug combos
+# d.phase2_dose_response_data <- read_csv(file.path(in_dir, "secondary-screen-replicate-collapsed-logfold-change.csv"))
+d.phase2_dose_response_data <- read_rds(file.path(out_dir, "d.phase2_dose_response_data"))
+
+d.cn_phase1_and_2_fdr_signif_pairs <- read_rds(file.path(out_dir, "d.combined_cn_phase1_fdr_signif_v_phase2_fdr"))
+
+d.expr_phase1_and_2_fdr_signif_pairs <- read_rds(file.path(out_dir, "d.combined_expr_phase1_fdr_signif_v_phase2_fdr"))
+
+d.cn_phase1_and_2_fdr_signif_data <- read_rds(file.path(out_dir, "d.DeKegel_top5_depmap_combined_cn_phase2_drug_pval_fdr_signif_phase1"))
+
+d.expr_phase1_and_2_fdr_signif_data <- read_rds(file.path(out_dir, "d.DeKegel_top5_depmap_combined_expr_phase2_drug_pval_fdr_signif_phase1"))
+
+```
+
+## Bosutinib + ABL1/2 only
+
+```{r}
+
+d.Broad_secondary_doses
+
+d.Phase1_significant_Phase2 %>%
+  filter(sorted_gene_pair == "ABL1_ABL2") %>%
+  filter(compound_name == "bosutinib")
+
+d.new <- left_join(d.Phase1_significant_Phase2, 
+                   d.Broad_secondary_doses, 
+                   by = c("depmap_id")) %>%
+  pivot_longer("BRD-K99964838-001-11-9::0.00061034::HTS002":"BRD-K99964838-001-11-9::2.5::HTS002",
+               names_to = "compound_dose", 
+               values_to = "rep_collapsed_LFC")
+
+```
+
+```{r}
+
+d.new <- d.new  %>%
+  separate(col = compound_dose, into = c("id_rm", "dose", "screen_rm"), sep = "::", remove = FALSE) %>%
+  dplyr::select(-c("id_rm", "screen_rm")) %>%
+  filter(!is.na(rep_collapsed_LFC)) 
+d.new
+
+```
+
+```{r}
+
+d.new  %>%
+  mutate("dose" = as.numeric(dose)) %>%
+  group_by(combined_expr_bin, dose) %>%
+  summarize(median_lfc = median(rep_collapsed_LFC)) %>%
+  ggplot(aes(x = log2(dose), y = median_lfc, color = combined_expr_bin)) +
+  geom_point() +
+  geom_line()
+
+
+# ggplot(d.new, aes(x = ))
+
+
+```
+**To Do**
+* change x-axis to log2-scaled dose where you can see the actual values
+* fix background/color scheme
+* figure out if x-axis is scaled appropriately
+* find some way to show the variability among different cell lines?
+
+## All FDR significant pair + drug combos
+
+### Make DFs
+```{r}
+
+## save CSV object as RDS object to load more quickly in R in the future
+# d.phase2_dose_response_data %>%
+#   rename(depmap_id = 1) %>%
+#   write_rds(file.path(out_dir, "d.phase2_dose_response_data"))
+
+```
+
+```{r}
+
+# d.phase2_dose_response_data
+
+```
+
+```{r}
+
+cn_drug_ids <- d.cn_phase1_and_2_fdr_signif_pairs %>%
+  filter(phase2_fdr < 0.1) %>%
+  pull(compound_id)
+
+expr_drug_ids <- d.expr_phase1_and_2_fdr_signif_pairs %>%
+  filter(phase2_fdr < 0.1) %>%
+  pull(compound_id)
+
+## get columns from dose response dataframe that match drug IDs for 
+## drug/paralog pairs with FDR < 0.1 in phase 1 & 2 data
+d.phase2_dose_response_data_cn_signif <- d.phase2_dose_response_data %>%
+  dplyr::select(depmap_id, contains(cn_drug_ids)) %>%
+  pivot_longer(!depmap_id, 
+               names_to = "compound_dose", 
+               values_to = "rep_collapsed_lfc") %>%
+  separate(col = compound_dose, 
+           into = c("compound_id", "dose", "screen_rm"), 
+           sep = "::", 
+           extra = "merge", ## if there are >3 columns, merge the "extras" into the last col
+           remove = TRUE) %>% ## remove original column that is now separated
+  filter(screen_rm == "HTS002") %>% ## keep only HTS002 screen data
+  dplyr::select(-c("screen_rm")) %>%
+  mutate(dose = as.numeric(dose)) %>%
+  filter(!is.na(rep_collapsed_lfc)) ## 50,856 => 47,285 rows
+d.phase2_dose_response_data_cn_signif
+
+d.phase2_dose_response_data_expr_signif <- d.phase2_dose_response_data %>%
+  dplyr::select(depmap_id, contains(expr_drug_ids)) %>%
+  pivot_longer(!depmap_id, 
+               names_to = "compound_dose", 
+               values_to = "rep_collapsed_lfc") %>%
+  separate(col = compound_dose, 
+           into = c("compound_id", "dose", "screen_rm"), 
+           sep = "::", 
+           extra = "merge", ## if there are >3 columns, merge the "extras" into the last col
+           remove = TRUE) %>% ## remove original column that is now separated
+  filter(screen_rm == "HTS002") %>% ## keep only HTS002 screen data
+  dplyr::select(-c("screen_rm")) %>%
+  mutate(dose = as.numeric(dose)) %>%
+  filter(!is.na(rep_collapsed_lfc)) ## 35,208 => 31,378 rows
+d.phase2_dose_response_data_expr_signif
+
+```
+
+```{r}
+
+# d.cn_phase1_and_2_fdr_signif_data
+
+## merge DFs for cell line + CN/expression + FDR data and Phase 2 dose response data
+d.cn_phase1_and_2_fdr_signif_dose_response_data <- d.cn_phase1_and_2_fdr_signif_data %>%
+  left_join(d.phase2_dose_response_data_cn_signif, 
+            by = c("depmap_id", "compound_id")) %>%
+  filter(!is.na(rep_collapsed_lfc))
+
+d.expr_phase1_and_2_fdr_signif_dose_response_data <- d.expr_phase1_and_2_fdr_signif_data %>%
+  left_join(d.phase2_dose_response_data_expr_signif, 
+            by = c("depmap_id", "compound_id")) %>%
+  filter(!is.na(rep_collapsed_lfc))
+
+```
+
+```{r}
+
+## summarize data - median LFC per bin for each drug/paralog pair combo
+d.cn_phase1_and_2_fdr_signif_dose_response_data_bin_summ <- d.cn_phase1_and_2_fdr_signif_dose_response_data %>%
+  group_by(gene_pair_compound_label, combined_cn_bin, dose) %>%
+  summarize(median_lfc = median(rep_collapsed_lfc)) %>%
+  ungroup()
+d.cn_phase1_and_2_fdr_signif_dose_response_data_bin_summ
+
+d.expr_phase1_and_2_fdr_signif_dose_response_data_bin_summ <- d.expr_phase1_and_2_fdr_signif_dose_response_data %>%
+  group_by(gene_pair_compound_label, combined_expr_bin, dose) %>%
+  summarize(median_lfc = median(rep_collapsed_lfc)) %>%
+  ungroup()
+d.expr_phase1_and_2_fdr_signif_dose_response_data_bin_summ
+
+```
+
+
+### Plot
+```{r}
+
+## test plots
+# d.cn_phase1_and_2_fdr_signif_dose_response_data %>%
+#   # filter(gene_pair_compound_label == "PAK1_PAK2\nRKI-1447") %>%
+#   mutate("dose" = as.numeric(dose)) %>%
+#   group_by(gene_pair_compound_label, combined_cn_bin, dose) %>%
+#   summarize(median_lfc = median(rep_collapsed_lfc)) %>%
+#   ggplot(aes(x = log2(dose), y = median_lfc, color = combined_cn_bin)) +
+#   geom_point() +
+#   geom_line()  +
+#   scale_color_brewer(palette = "RdBu", direction = -1) +
+#   theme_bw() +
+#   theme(aspect.ratio = 0.75,
+#         axis.text = element_text(color = "black"),
+#         axis.ticks = element_line(color = "black")) +
+#   facet_wrap(~gene_pair_compound_label)
+
+```
+
+
+```{r}
+
+## plot all CN FDR < 0.1 pairs
+
+length <- d.cn_phase1_and_2_fdr_signif_dose_response_data_bin_summ %>%
+  ungroup() %>%
+  distinct(gene_pair_compound_label) %>%
+  nrow()
+
+# d.fdr_labels <- d.DeKegel_top5_depmap_combined_cn_phase2_drug_pval_fdr_signif_phase1 %>%
+#   ungroup() %>%
+#   dplyr::select(gene_pair_compound_label, combined_cn_bin, fdr)
+  
+aspect_ratio <- 0.75
+n_rows <- 1
+n_cols <- 1
+n_pages <- ceiling(length/(n_rows*n_cols))
+
+# pdf(file.path(out_dir, "d.cn_phase1_and_2_fdr_signif_dose_response_data_bin_summ_dose_response.pdf"),
+#     width = 4, height = 2.5)
+# for(i in 1:n_pages){
+#   print(
+#     ggplot(d.cn_phase1_and_2_fdr_signif_dose_response_data_bin_summ,
+#            aes(x = log2(dose), y = median_lfc, color = combined_cn_bin)) +
+#       geom_point() +
+#       geom_line()  +
+#       # coord_trans(x = "log2") +
+#       scale_color_brewer(palette = "RdBu", direction = -1) +
+#       theme_bw() +
+#       theme(aspect.ratio = 0.75,
+#             axis.text = element_text(color = "black"),
+#             axis.ticks = element_line(color = "black")) +
+#       facet_wrap_paginate(~gene_pair_compound_label, scales = "free_y",
+#                           nrow = n_rows, ncol = n_cols, page = i)
+#   )
+#   }
+# dev.off()
+
+```
+
+```{r}
+
+## plot all expr FDR < 0.1 pairs
+
+length <- d.expr_phase1_and_2_fdr_signif_dose_response_data_bin_summ %>%
+  ungroup() %>%
+  distinct(gene_pair_compound_label) %>%
+  nrow()
+
+# d.fdr_labels <- d.DeKegel_top5_depmap_combined_cn_phase2_drug_pval_fdr_signif_phase1 %>%
+#   ungroup() %>%
+#   dplyr::select(gene_pair_compound_label, combined_cn_bin, fdr)
+  
+aspect_ratio <- 0.75
+n_rows <- 1
+n_cols <- 1
+n_pages <- ceiling(length/(n_rows*n_cols))
+
+# pdf(file.path(out_dir, "d.expr_phase1_and_2_fdr_signif_dose_response_data_bin_summ_dose_response.pdf"),
+#     width = 4, height = 2.5)
+# for(i in 1:n_pages){
+#   print(
+#     ggplot(d.expr_phase1_and_2_fdr_signif_dose_response_data_bin_summ,
+#            aes(x = log2(dose), y = median_lfc, color = combined_expr_bin)) +
+#       geom_point() +
+#       geom_line()  +
+#       # coord_trans(x = "log2") +
+#       scale_color_brewer(palette = "RdBu", direction = -1) +
+#       theme_bw() +
+#       theme(aspect.ratio = 0.75,
+#             axis.text = element_text(color = "black"),
+#             axis.ticks = element_line(color = "black")) +
+#       facet_wrap_paginate(~gene_pair_compound_label, scales = "free",
+#                           nrow = n_rows, ncol = n_cols, page = i)
+#   )
+#   }
+# dev.off()
+
+```
+
+
+

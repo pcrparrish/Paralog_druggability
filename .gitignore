@@ -9,3 +9,4 @@ CCNL1-CCNL2-DE-in-A549.csv
 # ignore all input and output files
 01_input_files/
 02_output_files/
+d.phase2_dose_response_data
