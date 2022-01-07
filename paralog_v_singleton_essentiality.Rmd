@@ -1,0 +1,188 @@
+---
+title: "paralog_v_singleton_essentiality"
+author: "Phoebe Parrish"
+date: "1/5/2022"
+output: html_document
+---
+
+## Setup
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(ggrepel)
+library(RColorBrewer)
+library(ggpubr) # another way to do significance bars
+
+```
+
+
+### Assign variables
+```{r}
+
+date <- Sys.Date()
+
+## work laptop
+base_dir <- file.path("/Users", "pparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
+                      "01_Data", "Paralog_SL_meta_analysis")
+
+## personal laptop
+# base_dir <- file.path("/Users", "phoebeparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
+#                       "01_Data", "Paralog_SL_meta_analysis")
+
+in_dir <- file.path(base_dir, "01_input_files")
+
+out_dir <- file.path(base_dir, "02_output_files")
+
+
+```
+
+
+### Import files
+
+```{r}
+
+d.Parrish_DeKegel <- read_rds(file.path(out_dir, "d.Parrish_DeKegel"))
+
+d.AV_screen <- read_tsv(file.path(in_dir, "Luciferase_DMSO_LTP_v_Plasmid.txt"))
+
+d.AV_genes <- read_tsv(file.path(in_dir, "Athea_genes_Ensembl_IDs.txt"))
+
+d.pan_essentials <- read_csv(file.path(in_dir, ("Achilles_common_essentials.csv")))
+
+d.AV_paralog_annot <- read_tsv(file.path(in_dir, "Athea_CRISPR_data_paralogs_vs_singletons.txt"))
+
+```
+
+### Reformat files
+
+```{r}
+
+## fix pan-essentials formatting and save as RDS
+d.pan_essentials <- d.pan_essentials %>% 
+  mutate(gene = str_replace(gene, "\\s", "|")) %>% 
+  separate(gene, into = c("gene", "entrez_id"), sep = "\\|") %>%
+  mutate(entrez_id = gsub("(", "", entrez_id, fixed=TRUE)) %>%
+  mutate(entrez_id = gsub(")", "", entrez_id, fixed=TRUE)) 
+d.pan_essentials
+
+# write_rds(d.pan_essentials, file.path(out_dir, "d.pan_essentials"))
+
+```
+
+
+```{r}
+
+## add ensembl IDs to Athea's DF, fix column names
+d.AV_screen <- d.AV_screen %>%
+  rename(gene_name = id, gene_rank = "Gene Rank", PC9_CS = LUC_DMSO_avg) #%>%
+  # left_join(d.AV_genes, by = c("gene_name" = "Gene_name")) %>%
+  # rename(ensembl_id = Gene_stable_ID) 
+d.AV_screen
+
+```
+
+
+```{r}
+
+## add Achilles pan-essential info to Athea's DF
+pan_essentials <- d.pan_essentials %>%
+  pull(gene)
+
+d.AV_screen %>%
+  mutate(pan_essential_flag = ifelse(gene_name %in% pan_essentials, 
+                                     TRUE, FALSE)) %>%
+  group_by(pan_essential_flag) %>%
+  summarize(n = n())
+# 2381 pan-essentials vs. 2,149 in the original file..this was an issue with the Ensembl IDs
+# now it is 2,107 which seems more reasonable. I should probably technically get the Entrez IDs
+# for the genes and cross-reference that way but...ugh
+
+d.AV_screen <- d.AV_screen %>%
+  mutate(pan_essential_flag = ifelse(gene_name %in% pan_essentials, 
+                                     TRUE, FALSE))
+  
+
+d.AV_screen %>%
+  group_by(gene_name) %>%
+  filter(n() > 1)
+# no genes have multiple IDs now
+
+```
+
+```{r}
+
+d.tmp <- d.AV_paralog_annot %>%
+  dplyr::select(id, group)
+
+d.tmp %>%
+  group_by(group) %>%
+  summarize(n = n())
+
+d.AV_screen <- d.AV_screen %>%
+  left_join(d.tmp, by = c("gene_name" = "id")) %>%
+  dplyr::select(-ctl) %>%
+  mutate(paralog_flag = case_when(
+    group == "non_overlaps" ~ "singleton", 
+    group == "overlaps" ~ "paralog"
+  ))
+
+```
+
+## Analysis
+
+```{r}
+
+d.Parrish_DeKegel %>%
+  group_by(broader_SL_flag) %>%
+  summarize(n = n()) %>%
+  mutate(prop = n/sum(n))
+
+# ggplot(d.Parrish_DeKegel, aes (y = ))
+
+d.AV_screen %>%
+  mutate(essential_flag = case_when(
+    pan_essential_flag == TRUE & PC9_CS < -0.5 ~ "pan_essential",
+    pan_essential_flag == FALSE & PC9_CS < -0.5 ~ "PC9_essential_only", 
+    PC9_CS >= -0.5 ~ "non_essential")) %>%
+  group_by(essential_flag) %>%
+  summarize(n = n()) %>%
+  mutate(prop = n/sum(n))
+  
+
+```
+
+```{r}
+
+## singletons only for Athea's data
+d.AV_screen %>%
+  filter(paralog_flag == "singleton") %>%
+  mutate(essential_flag = case_when(
+    pan_essential_flag == TRUE & PC9_CS < -0.5 ~ "pan_essential",
+    pan_essential_flag == FALSE & PC9_CS < -0.5 ~ "PC9_essential_only", 
+    PC9_CS >= -0.5 ~ "non_essential")) %>%
+  group_by(essential_flag) %>%
+  summarize(n = n()) %>%
+  mutate(prop = n/sum(n))
+
+```
+
+To Do: 
+* Look at Athea's data - plot hit rate from PC9 vs. pan-essential
+* Look at Athea's data - singletons only 
+* Look at DepMap single-gene CRISPR data overall — what is the hit rate of essentiality for singletons? 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

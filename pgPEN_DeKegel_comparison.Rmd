@@ -1,5 +1,5 @@
 ---
-title: "pgPEN_DeKegel_overlap"
+title: "pgPEN_DeKegel_comparison"
 author: "Phoebe Parrish"
 date: "10/21/2021"
 output:
@@ -252,6 +252,22 @@ This analysis shows that SL paralogs were likely to be older. This makes sense i
 
 ```{r}
 
+ggplot(d.Parrish_DeKegel, aes(x = WGD, y = mean_age, fill = broader_SL_flag)) +
+  geom_jitter(alpha = 0.75, width = 0.3, aes(color = broader_SL_flag)) + 
+  geom_boxplot(width = 0.25, outlier.shape = NA) +
+  # theme_bw(base_size = 16) +
+  theme(legend.position = "none", 
+        aspect.ratio = 1,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~broader_SL_flag)
+
+```
+
+
+
+```{r}
+
 ggplot(d.Parrish_DeKegel_high_conf, aes(x = mean_GI_score, y = fet_ppi_overlap)) + 
   geom_point() +
   geom_text_repel(aes(label = paralog_pair), segment.size = 0.2) +
@@ -263,4 +279,17 @@ ggplot(d.Parrish_DeKegel_high_conf, aes(x = mean_GI_score, y = fet_ppi_overlap))
 
 ```
 
-This analysis compares the mean GI score across PC9 and HeLa cell lines to the PPI overlap among paralog pairs. 
+This analysis compares the mean GI score across PC9 and HeLa cell lines to the PPI overlap among paralog pairs.
+
+
+## Write output
+```{r}
+
+write_rds(d.Parrish_DeKegel, file.path(out_dir, "d.Parrish_DeKegel"))
+
+```
+
+
+
+
+
