@@ -1,0 +1,376 @@
+---
+title: "overall_paralog_SL_feature_analysis"
+author: "Phoebe Parrish"
+date: "2022-01-07"
+output: html_document
+---
+
+## To Do
+* update depmap version - use more recent data (I am currently using 19Q1)
+* do quartile analysis similar to what James did
+
+## Setup
+
+```{r setup, include=FALSE}
+
+library(biomaRt)
+library(depmap)
+library(ExperimentHub)
+library(tidyverse)
+library(ggrepel)
+library(ggforce)
+library(ggsignif)
+library(RColorBrewer)
+library(ggpubr) # another way to do significance bars
+library(ggprism) # another significance bar package...
+
+```
+
+
+### Assign variables
+```{r}
+
+date <- Sys.Date()
+
+## work laptop
+base_dir <- file.path("/Users", "pparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
+                      "01_Data", "Paralog_SL_meta_analysis")
+
+## personal laptop
+# base_dir <- file.path("/Users", "phoebeparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
+#                       "01_Data", "Paralog_SL_meta_analysis")
+
+in_dir <- file.path(base_dir, "01_input_files")
+
+out_dir <- file.path(base_dir, "02_output_files")
+
+
+```
+
+
+### Import files
+
+```{r, message = FALSE}
+
+d.DeKegel <- read_csv(file.path(in_dir, "DeKegel_Table_S8.csv"))
+
+d.Parrish <- read_rds(file.path(in_dir, "d.PC9_v_HeLa_paralog_target_GI_wide_flag"))
+
+d.Dede <- read_tsv(file.path(in_dir, "Dede_Table_S2.txt"))
+
+d.druggable <- read_tsv(file.path(in_dir, "finan_druggability_with_ensembl_id.txt"))
+
+d.Broad_drug_info <- read_csv(file.path(in_dir, "primary-screen-replicate-collapsed-treatment-info.csv"))
+
+d.Broad_secondary_auc <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
+
+d.Broad_secondary_doses <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
+
+```
+
+## Analysis
+
+### DepMap expression/CN
+### Combined CN vs. expression
+
+* filter out multiples of cell lines!!!
+* plot correlation values b/w CN & expression (r or r^2?)
+
+```{r}
+
+d.DeKegel_top5_combined_cn_drug_pair_pval
+
+d.DeKegel_top5_combined_expr_drug_pair_pval
+
+# d.cn_vs_expr <- inner_join(d.DeKegel_top5_combined_cn_drug_pair_pval, 
+#                           d.DeKegel_top5_combined_expr_drug_pair_pval, 
+#                           by = c("sorted_gene_pair", "depmap_id")) %>%
+#   filter(!is.na(combined_cn)) %>%
+#   filter(!is.na(combined_expr))
+# d.cn_vs_expr
+
+d.tmp1 <- d.DeKegel_top5_combined_cn_drug_pair_pval %>%
+  dplyr::select(depmap_id, sorted_gene_pair, combined_log_cn) 
+
+d.tmp2 <- d.DeKegel_top5_combined_expr_drug_pair_pval %>%
+  dplyr::select(depmap_id, sorted_gene_pair, combined_expr)
+
+d.tmp3 <- inner_join(d.tmp1, d.tmp2, by = c("depmap_id", "sorted_gene_pair")) %>%
+  drop_na()
+d.tmp3
+
+```
+
+```{r}
+
+## HDAC1/2 example - get cor
+
+d.tmp3 %>%
+  filter(sorted_gene_pair == "HDAC1_HDAC2") %>%
+  dplyr::select(combined_log_cn, combined_expr) %>%
+  cor() #%>%
+  # pull(combined_expr)
+
+HDAC_lm <- lm(data = d.tmp3, combined_expr ~ combined_log_cn)
+summary(HDAC_lm)
+
+d.tmp3 %>%
+  filter(sorted_gene_pair == "HDAC1_HDAC2")
+
+```
+
+
+```{r}
+
+## HDAC1/2 plot
+
+# d.tmp3 %>%
+#   filter(sorted_gene_pair == "HDAC1_HDAC2") %>%
+#   ggplot(aes(x = combined_log_cn, y = combined_expr)) +
+#   geom_point() +
+#   geom_smooth(method = "lm", se = FALSE) +
+#   labs(x = "combined_log2_cn", 
+#        y = "combined_log2_expr") +
+#   theme_bw() +
+#   theme(aspect.ratio = 1,
+#         axis.text = element_text(color = "black"),
+#         axis.ticks = element_line(color = "black")) +
+#   facet_wrap(~sorted_gene_pair)
+
+# ggsave(file.path(out_dir, "DeKegel_top5_combined_cn_vs_combined_expr_DepMap_HDAC1_HDAC2.pdf"),
+#         width = 4, height = 4)
+
+
+# contour.pal <- colorRampPalette(brewer.pal(n = 9, name ="Spectral"))(50)
+d.tmp3 %>%
+  filter(sorted_gene_pair == "HDAC1_HDAC2") %>%
+  ggplot(aes(x = combined_log_cn, y = combined_expr)) +
+  geom_point() +
+  # geom_density2d(aes(color = ..level..), alpha = 0.7) +
+  geom_text(mapping = aes(x = -Inf, y = Inf, label = paste0("r=", 0.565)),
+            hjust = -0.25, vjust = 1.75, size = 3) +
+  # geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "combined_log2_cn", 
+       y = "combined_log2_expr") +
+  theme_bw() +
+  theme(aspect.ratio = 1,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~sorted_gene_pair)
+
+ggsave(file.path(out_dir, "DeKegel_top5_combined_cn_vs_combined_expr_DepMap_HDAC1_HDAC2_cor.pdf"),
+        width = 4, height = 4)
+
+```
+
+```{r}
+
+## all top 5% paralogs
+
+d.tmp3 %>%
+  ggplot(aes(x = combined_log_cn, y = combined_expr)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "combined_log2_cn", 
+       y = "combined_log2_expr") +
+  theme_bw() +
+  theme(aspect.ratio = 1,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+# ggsave(file.path(out_dir, "DeKegel_top5_combined_cn_vs_combined_expr_DepMap_cell_lines.pdf"),
+#         width = 4, height = 4)
+
+```
+
+```{r}
+
+
+
+```
+
+
+```{r}
+
+length <- d.tmp3 %>%
+  ungroup() %>%
+  distinct(sorted_gene_pair) %>%
+  nrow()
+  
+aspect_ratio <- 1
+n_rows <- 1
+n_cols <- 1
+n_pages <- ceiling(length/(n_rows*n_cols))
+
+# pdf(file.path(out_dir, "DeKegel_top5_combined_expr_vs_combined_cn.pdf"),
+#     width = 4, height = 2.5)
+# for(i in 1:n_pages){
+#   p <-  ggplot(d.tmp3, aes(x = combined_log_cn, y = combined_expr)) +
+#   geom_point() +
+#   theme_bw() +
+#   theme(aspect.ratio = aspect_ratio,
+#         axis.text = element_text(color = "black"),
+#         axis.ticks = element_line(color = "black"),
+#         legend.position = "none") +
+#   facet_wrap_paginate(~sorted_gene_pair, scales = "free",
+#                       nrow = n_rows, ncol = n_cols, page = i)
+#     print(ggarrange(p, ncol = 1))
+# }
+# dev.off()
+
+```
+
+#### All lineages/diseases
+```{r}
+
+gene_list <- c("CDK11A", "CDK11B", "CCNL1", "CCNL2")
+
+## lineage x expression
+metadata %>%
+  dplyr::select(depmap_id, lineage) %>%
+  dplyr::full_join(expr, by = "depmap_id") %>%
+  dplyr::filter(gene_name %in% gene_list) %>%
+  ggplot(aes(x = lineage, y = rna_expression, fill = lineage)) + 
+  geom_boxplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none", 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~gene_name)
+
+## lineage x CN
+metadata %>%
+  dplyr::select(depmap_id, lineage) %>%
+  dplyr::full_join(cn, by = "depmap_id") %>%
+  dplyr::filter(gene_name %in% gene_list) %>%
+  ggplot(aes(x = lineage, y = log_copy_number, fill = lineage)) + 
+  geom_boxplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none", 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~gene_name, scales = "free_y")
+
+## primary_disease x expression
+metadata %>%
+  dplyr::select(depmap_id, primary_disease) %>%
+  dplyr::full_join(expr, by = "depmap_id") %>%
+  dplyr::filter(gene_name %in% gene_list) %>%
+  ggplot(aes(x = primary_disease, y = rna_expression, fill = primary_disease)) + 
+  geom_boxplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none", 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~gene_name)
+
+## primary_disease x CN
+metadata %>%
+  dplyr::select(depmap_id, primary_disease) %>%
+  dplyr::full_join(cn, by = "depmap_id") %>%
+  dplyr::filter(gene_name %in% gene_list) %>%
+  ggplot(aes(x = primary_disease, y = log_copy_number, fill = primary_disease)) + 
+  geom_boxplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none", 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~gene_name, scales = "free_y")
+
+```
+
+#### Lung only
+```{r}
+
+gene_list <- c("CDK11A", "CDK11B", "CCNL1", "CCNL2")
+
+metadata %>%
+  dplyr::select(depmap_id, lineage, lineage_subtype, primary_disease) %>%
+  dplyr::full_join(expr, by = "depmap_id") %>%
+  dplyr::filter(lineage == "lung") %>%
+  dplyr::filter(gene_name %in% gene_list) %>%
+  ggplot(aes(x = lineage_subtype, y = rna_expression, fill = lineage_subtype)) + 
+  geom_boxplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none", 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~gene_name)
+
+metadata %>%
+  dplyr::select(depmap_id, lineage, lineage_subtype) %>%
+  dplyr::full_join(cn, by = "depmap_id") %>%
+  dplyr::filter(lineage == "lung") %>%
+  dplyr::filter(gene_name %in% gene_list) %>%
+  ggplot(aes(x = lineage_subtype, y = log_copy_number, fill = lineage_subtype)) + 
+  geom_boxplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none", 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~gene_name, scales = "free_y")
+
+
+```
+
+
+```{r}
+
+metadata %>%
+  dplyr::select(depmap_id, cell_line, primary_disease) %>%
+  dplyr::full_join(mut_calls, by = "depmap_id")
+
+metadata %>%
+  dplyr::select(depmap_id, cell_line, lineage, primary_disease, subtype_disease) %>%
+  dplyr::full_join(mut_calls, by = "depmap_id") %>%
+  dplyr::filter(gene_name %in% gene_list) %>%
+  dplyr::filter(is_deleterious == TRUE) %>%
+  dplyr::filter(lineage == "lung") %>%
+  group_by(primary_disease, gene_name) %>%
+  summarize(counts = n()) %>%
+  ggplot(aes(x = primary_disease, y = counts, fill = primary_disease)) +
+  geom_bar(stat = "identity") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none", 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~gene_name, scales = "free_y")
+
+metadata %>%
+  dplyr::select(depmap_id, cell_line, primary_disease, subtype_disease) %>%
+  dplyr::full_join(mut_calls, by = "depmap_id") %>%
+  filter(gene_name %in% gene_list) %>%
+  filter(primary_disease == "Lung Cancer") %>%
+  filter(is_deleterious == TRUE)
+
+head(metadata)
+
+
+```
+
+I realized that CDK11A, CDK11B, and CCNL2 seemed to be frequently mutated in the same samples. So I checked cBioPortal/TCGA data and saw that they were frequently co-deleted in tumor samples: 
+![cBioPortal oncoprint image for CDK11A/B and CCNL1/2 in the TCGA PanCancer Atlas data, cropped to focus on mutated samples.](file.path(in_dir, "images", "TCGA_allLUAD_oncoprint_CDK11_CCNL_cropped.png"))
+
+And that according to the UCSC Genome Browser, they are all located close together on chromosome 1p36.33. 
+![UCSC genome browser image of chromosome 1p36.33, which includes CDK11A/B and CCNL2.](file.path(in_dir, "images", "chr1p36.33_genes.png"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+

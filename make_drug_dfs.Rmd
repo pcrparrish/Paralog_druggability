@@ -1,0 +1,1274 @@
+---
+title: "make_drug_dfs"
+author: "Phoebe Parrish"
+date: "2022-01-07"
+output: html_document
+---
+
+## To Do
+* update depmap version - use more recent data (I am currently using 19Q1)
+
+## Setup
+
+```{r setup, include=FALSE}
+
+library(biomaRt)
+library(depmap)
+library(ExperimentHub)
+library(tidyverse)
+library(ggrepel)
+library(ggforce)
+library(ggsignif)
+library(RColorBrewer)
+library(ggpubr) # another way to do significance bars
+library(ggprism) # another significance bar package...
+
+```
+
+
+### Assign variables
+```{r}
+
+date <- Sys.Date()
+
+## work laptop
+base_dir <- file.path("/Users", "pparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
+                      "01_Data", "Paralog_SL_meta_analysis")
+
+## personal laptop
+# base_dir <- file.path("/Users", "phoebeparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
+#                       "01_Data", "Paralog_SL_meta_analysis")
+
+in_dir <- file.path(base_dir, "01_input_files")
+
+out_dir <- file.path(base_dir, "02_output_files")
+
+
+```
+
+
+### Import files
+
+```{r, message = FALSE}
+
+d.DeKegel <- read_csv(file.path(in_dir, "DeKegel_Table_S8.csv"))
+
+d.Parrish <- read_rds(file.path(in_dir, "d.PC9_v_HeLa_paralog_target_GI_wide_flag"))
+
+d.Dede <- read_tsv(file.path(in_dir, "Dede_Table_S2.txt"))
+
+d.druggable <- read_tsv(file.path(in_dir, "finan_druggability_with_ensembl_id.txt"))
+
+d.Broad_drug_info <- read_csv(file.path(in_dir, "primary-screen-replicate-collapsed-treatment-info.csv"))
+
+d.Broad_secondary_auc <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
+
+d.Broad_secondary_doses <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
+
+```
+
+## Analysis
+
+### Get Ensembl IDs and merge
+
+```{r}
+
+d.DeKegel <- d.DeKegel %>%
+  unite(ensembl_pair, c(A1_ensembl, A2_ensembl), sep = "_", remove = FALSE) 
+
+d.Parrish <- d.Parrish %>%
+  rename(ensembl_pair_1 = ensembl_paralog_pair) %>%
+  unite(ensembl_pair_2, c(target2_ensembl_id, target1_ensembl_id), sep = "_", remove = FALSE)
+
+```
+
+```{r}
+
+# d.Dede %>%
+#   separate(gene_pair, c("gene1", "gene2"), sep = "_") %>%
+  
+
+```
+
+
+```{r}
+
+d.Parrish_DeKegel_1 <- inner_join(d.Parrish, d.DeKegel, by = c("ensembl_pair_1" = "ensembl_pair"))
+d.Parrish_DeKegel_1
+
+d.Parrish_DeKegel_2 <- inner_join(d.Parrish, d.DeKegel, by = c("ensembl_pair_2" = "ensembl_pair"))
+d.Parrish_DeKegel_2
+
+d.Parrish_DeKegel <- bind_rows(d.Parrish_DeKegel_1, d.Parrish_DeKegel_2)
+d.Parrish_DeKegel
+
+```
+
+
+```{r}
+
+d.Parrish_DeKegel <- d.Parrish_DeKegel %>%
+  mutate(top_5_percent_flag = ifelse(prediction_percentile < 5, TRUE, FALSE)) %>%
+  mutate(comp_validated_flag = ifelse(broad_SL_flag != "SL_in_neither" & 
+                                        top_5_percent_flag == TRUE, TRUE, FALSE)) 
+
+d.Parrish_DeKegel_high_conf <- d.Parrish_DeKegel %>%
+  filter(broader_SL_flag == "SL_in_both" & comp_validated_flag == TRUE) %>%
+  rowwise() %>%
+  mutate(mean_GI_score = mean(c(PC9_gene_gene_GI_score, HeLa_gene_gene_GI_score)))
+d.Parrish_DeKegel_high_conf
+
+d.Parrish_DeKegel_medium_conf <- d.Parrish_DeKegel %>%
+  filter(comp_validated_flag == TRUE)
+
+```
+
+### Finan druggability
+
+Intersect high-confidence hits (screens + depmap predictions?) with druggability...
+```{r}
+
+d.druggable
+d.DeKegel
+
+d.tmp <- d.druggable %>%
+  dplyr::select(ensembl_gene_id, druggability_tier)
+
+d.DeKegel_drug <- left_join(d.DeKegel, d.tmp, by = c("A1_ensembl" = "ensembl_gene_id")) %>%
+  rename(A1_drug_tier = druggability_tier) %>%
+  left_join(d.tmp, by = c("A2_ensembl" = "ensembl_gene_id")) %>%
+  rename(A2_drug_tier = druggability_tier)
+d.DeKegel_drug
+
+d.DeKegel_drug <- d.DeKegel_drug %>%
+  mutate(druggable_flag = case_when(
+    is.na(A2_drug_tier) ~ FALSE,
+    is.na(A2_drug_tier) ~ FALSE,
+    TRUE ~ TRUE), 
+    top_5_percent = ifelse(prediction_percentile < 5, TRUE, FALSE)) %>%
+  mutate(top_5_SL_ge_1_screen = case_when(
+      top_5_percent == TRUE & n_screens_SL > 0 ~ TRUE,
+      TRUE ~ FALSE)) %>%
+  mutate(SL_screen_ratio = n_screens_SL / n_screens) %>%
+  mutate(top_5_SL_all_screens = case_when(
+    top_5_percent == TRUE & SL_screen_ratio == 1 ~ TRUE,
+    TRUE ~ FALSE))
+
+```
+
+```{r}
+
+## druggable & top 5th percentile
+d.DeKegel_drug %>%
+  group_by(top_5_percent, druggable_flag) %>%
+  summarize(n = n())
+
+d.DeKegel_drug %>%
+  filter(top_5_percent == TRUE) %>%
+  filter(druggable_flag == TRUE)
+
+## druggable, top 5th percentile, and SL in ≥1 screen
+d.DeKegel_drug %>%
+  group_by(top_5_SL_ge_1_screen, druggable_flag) %>%
+  summarize(n = n())
+
+d.DeKegel_drug %>%
+  filter(top_5_SL_ge_1_screen == TRUE) %>%
+  filter(druggable_flag == TRUE)
+
+## druggable, top 5th percentile, and SL in all screens 
+d.DeKegel_drug %>%
+  group_by(top_5_SL_all_screens, druggable_flag) %>%
+  summarize(n = n())
+
+d.DeKegel_drug %>%
+  filter(top_5_SL_all_screens == TRUE) %>%
+  filter(druggable_flag == TRUE)
+
+```
+
+Next, since there are not many druggable paralogs that have been SL in multiple screens, I decided to look at the proportion of overall paralogs included in the De Kegel study that were screened at all: 
+```{r}
+
+d.DeKegel %>%
+  mutate(screened_flag = ifelse(n_screens >= 1, TRUE, FALSE)) %>%
+  ggplot(aes(x = screened_flag, fill = screened_flag)) +
+  geom_bar(position = "identity", color = "black") +
+  theme_classic () + 
+  theme(aspect.ratio = 0.75, 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+d.DeKegel %>%
+  mutate(screened_flag = ifelse(n_screens >= 1, TRUE, FALSE)) %>%
+  group_by(screened_flag) %>%
+  summarize(prop_screened = (n()/nrow(d.DeKegel))) %>%
+  mutate(group_label = paste0(round(100 * prop_screened, 2), "%")) %>%
+  ungroup() %>%
+  arrange(prop_screened) %>%
+  ggplot(aes(x = "", y = prop_screened, fill = screened_flag)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar("y", start = 0) +
+  theme_void() +
+  geom_text(aes(x = 1, y = cumsum(prop_screened) - prop_screened/2, label = group_label))
+
+```
+So only ~5% of all paralogs have been included in CRISPR screens to date. This does not include the new loss of Y paper that came out, but that screened a limited number of druggable genes I think. 
+
+
+### DepMap drug data
+Also see: https://depmap.org/repurposing/
+```{r}
+
+# eh <- ExperimentHub()
+# eh.depmap <- query(eh, "depmap")
+# 
+# # drug_sensitivity <- eh[["EH3087"]]
+# 
+# # metadata <- read_rds(file.path(in_dir, "depmap_metadata"))
+# 
+# foo = tibble("eh_id" = names(eh.depmap),
+#              "title" = eh.depmap$title)
+# foo %>% print(n = Inf)
+
+```
+
+```{r, include=FALSE}
+
+# ## use this the first time only
+# crispr <- eh[["EH6118"]]
+# mut_calls <- eh[["EH6121"]]
+# metadata <- eh[["EH6122"]]
+# cn <- eh[["EH6119"]]
+# expr <- eh[["EH6120"]]
+# 
+# drug_sensitivity <- eh[["EH3087"]]
+# drug_metadata <- eh[["EH3086"]]
+# ## note: drug info is from 19Q4, these are 19Q3
+# 
+# ## read in RDS files
+# crispr <- read_rds(file.path(in_dir, "depmap_crispr"))
+# # mutationCalls <- read_rds(file.path(in_dir, "depmap_mutationCalls"))
+# # metadata <- read_rds(file.path(in_dir, "depmap_metadata"))
+# copyNumber <- read_rds(file.path(in_dir, "depmap_copyNumber"))
+# expr <- read_rds(file.path(in_dir, "depmap_expr"))
+# 
+# # write_rds(crispr, file.path(in_dir, "depmap_crispr"))
+# # write_rds(mutationCalls, file.path(in_dir, "depmap_mutationCalls"))
+# # write_rds(metadata, file.path(in_dir, "depmap_metadata"))
+# # write_rds(copyNumber, file.path(in_dir, "depmap_copyNumber"))
+# # write_rds(expr, file.path(in_dir, "depmap_expr"))
+
+```
+
+
+
+```{r, include=FALSE}
+
+# drug_sensitivity
+# expr
+# 
+# ggplot(expr, aes(x = rna_expression)) +
+#   geom_histogram(binwidth = 0.5, color = "black", fill = "gray") +
+#   geom_vline(xintercept = 1.5, color = "red", linetype = "dashed") +
+#   theme_classic() + 
+#   theme(aspect.ratio = 0.75, 
+#         axis.text = element_text(color = "black"),
+#         axis.ticks = element_line(color = "black"))
+# # ggsave(file.path(out_dir, "depmap_rna_expr_allCellLines_allGenes.png"),
+# #        width = 4.5, height = 3)
+
+```
+
+
+```{r, include=FALSE}
+
+# copyNumber
+
+# cn
+# 
+# median(cn$log_copy_number, na.rm = TRUE)
+# 
+# # cn %>%
+# #   summarize(median_cn = median(log_copy_number))
+# 
+# ggplot(cn, aes(x = log_copy_number)) +
+#   geom_histogram(binwidth = 0.25, color = "black", fill = "gray") +
+#   # geom_vline(xintercept = 1.5, color = "red", linetype = "dashed") +
+#   theme_classic() +
+#   theme(aspect.ratio = 0.75,
+#         axis.text = element_text(color = "black"),
+#         axis.ticks = element_line(color = "black"))
+# # ggsave(file.path(out_dir, "depmap_cn_allCellLines_allGenes.png"),
+# #        width = 4.5, height = 3)
+
+```
+
+Expression (red line indicates TPM = 1.5): 
+![Histogram of RNA expression for all genes across all DepMap cell lines.](file.path(out_dir, "depmap_rna_expr_allCellLines_allGenes.png"))
+
+Copy number: 
+![Histogram of copy number for all genes across all DepMap cell lines.](file.path(out_dir, "depmap_cn_allCellLines_allGenes.png"))
+
+Cutoffs to apply: 
+* expression: >1.5 log2(TPM) = expressed
+* copy number: >1.5 log_copy_number = copy gain, < 0.5??? = copy loss
+
+#### Get gene list
+
+##### De Kegel top 5%
+```{r}
+
+DeKegel_top5_genes_entrez <- d.DeKegel %>%
+  filter(prediction_percentile < 5) %>%
+  dplyr::select(A1_entrez, A2_entrez) %>%
+  gather() %>%
+  distinct(value) %>%
+  pull(value)
+
+DeKegel_top5_genes_hgnc <- d.DeKegel %>%
+  filter(prediction_percentile < 5) %>%
+  dplyr::select(A1, A2) %>%
+  gather() %>%
+  distinct(value) %>%
+  pull(value)
+  
+```
+
+```{r, include=FALSE}
+
+# metadata
+# 
+# d.expr_DeKegel_top5 <- expr %>%
+#   dplyr::filter(entrez_id %in% DeKegel_top5_genes_entrez) 
+# d.expr_DeKegel_top5
+# 
+# d.cn_DeKegel_top5 <- cn %>%
+#   dplyr::filter(entrez_id %in% DeKegel_top5_genes_entrez)
+# d.cn_DeKegel_top5
+# 
+# d.mut_DeKegel_top5 <- mut_calls %>%
+#   dplyr::filter(entrez_id %in% DeKegel_top5_genes_entrez)
+# d.mut_DeKegel_top5
+# 
+# # write_rds(metadata, file.path(out_dir, "d.metadata_21Q2"))
+# # write_rds(d.expr_DeKegel_top5, file.path(out_dir, "d.expr_21Q2_DeKegel_top5"))
+# # write_rds(d.cn_DeKegel_top5, file.path(out_dir, "d.cn_21Q2_DeKegel_top5"))
+# # write_rds(d.mut_DeKegel_top5, file.path(out_dir, "d.mut_21Q2_DeKegel_top5"))
+
+```
+
+```{r}
+
+# metadata <- read_rds(file.path(out_dir, "d.metadata_21Q2"))
+# d.expr_top5 <- read_rds(file.path(out_dir, "d.expr_21Q2_DeKegel_top5"))
+# d.cn_top5 <- read_rds(file.path(out_dir, "d.cn_21Q2_DeKegel_top5"))
+# d.mut_top5 <- read_rds(filepath(out_dir, "d.mut_21Q2_DeKegel_top5"))
+
+```
+
+##### Top 5% and druggable
+```{r}
+
+d.DeKegel_top5_druggable <- d.DeKegel_drug %>%
+  filter(top_5_percent == TRUE) %>%
+  filter(druggable_flag == TRUE)
+d.DeKegel_top5_druggable
+
+d.DeKegel_top5_druggable <- d.DeKegel_drug %>%
+  filter(top_5_percent == TRUE) %>%
+  filter(druggable_flag == TRUE)
+d.DeKegel_top5_druggable
+
+top5_druggable_genes_entrez <- d.DeKegel_top5_druggable %>%
+  dplyr::select(A1_entrez, A2_entrez) %>%
+  gather() %>%
+  distinct(value) %>%
+  pull(value)
+
+top5_druggable_genes_hgnc <- d.DeKegel_top5_druggable %>%
+  dplyr::select(A1, A2) %>%
+  gather() %>%
+  distinct(value) %>%
+  pull(value)
+
+```
+
+##### Write output
+```{r}
+
+# metadata
+# 
+# d.expr_top5_drug <- expr %>%
+#   dplyr::filter(entrez_id %in% top5_druggable_genes_entrez) 
+# d.expr_top5_drug
+# 
+# d.cn_top5_drug <- cn %>%
+#   dplyr::filter(entrez_id %in% top5_druggable_genes_entrez)
+# d.cn_top5_drug
+# 
+# d.mut_top5_drug <- mut_calls %>%
+#   dplyr::filter(entrez_id %in% top5_druggable_genes_entrez)
+# d.mut_top5_drug
+# ## is_deleterious = key column
+# 
+# # write_rds(d.expr_top5_drug, file.path(out_dir, "d.expr_21Q2_DeKegel_top5_druggable"))
+# # write_rds(d.cn_top5_drug, file.path(out_dir, "d.cn_21Q2_DeKegel_top5_druggable"))
+# # write_rds(d.mut_top5_drug, file.path(out_dir, "d.mut_21Q2_DeKegel_top5_druggable"))
+
+```
+
+```{r}
+
+# d.Broad_drug_info %>%
+#   dplyr::filter(grepl("CDK4", target))
+# 
+# d.Broad_drug_info
+# 
+# d.Broad_drug_info %>%
+#   dplyr::filter(grepl(str_c(top5_druggable_genes_hgnc, collapse = "|"), target))
+# 
+# drug_list <- d.Broad_drug_info %>%
+#   dplyr::filter(grepl(str_c(top5_druggable_genes_hgnc, collapse = "|"), target)) %>%
+#   distinct(column_name) %>%
+#   dplyr::pull(column_name)
+# 
+# drug_list
+# 
+# # str_c(top5_druggable_genes_hgnc, collapse = "|")
+# 
+# # drug_sensitivity
+# 
+# d.drug_sens_filtered <- drug_sensitivity %>%
+#   dplyr::filter(compound %in% drug_list) %>%
+#   left_join(d.Broad_drug_info, by = c("compound" = "column_name"))
+# d.drug_sens_filtered
+# 
+# # write_rds(d.drug_sens_filtered, file.path(out_dir, "d.drug_sens_19Q3_DeKegel_top5_druggable"))
+# # write_rds(drug_metadata, file.path(out_dir, "d.metadata_19Q3"))
+
+```
+
+```{r}
+
+## 21Q2 datasets
+metadata <- read_rds(file.path(out_dir, "d.metadata_21Q2"))
+d.expr_top5 <- read_rds(file.path(out_dir, "d.expr_21Q2_DeKegel_top5"))
+d.expr_top5_drug <- read_rds(file.path(out_dir, "d.expr_21Q2_DeKegel_top5_druggable"))
+d.cn_top5 <- read_rds(file.path(out_dir, "d.cn_21Q2_DeKegel_top5"))
+d.cn_top5_drug <- read_rds(file.path(out_dir, "d.cn_21Q2_DeKegel_top5_druggable"))
+d.mut_top5 <- read_rds(file.path(out_dir, "d.mut_21Q2_DeKegel_top5"))
+d.mut_top5_drug <- read_rds(file.path(out_dir, "d.mut_21Q2_DeKegel_top5_druggable"))
+
+## 19Q3 datasets
+drug_metadata <- read_rds(file.path(out_dir, "d.metadata_19Q3"))
+d.drug_sens_filtered <- read_rds(file.path(out_dir, "d.drug_sens_19Q3_DeKegel_top5_druggable"))
+
+```
+
+#### CN DFs
+```{r}
+
+# ## join tbls together
+# 
+# ## get useful DepMap CN information
+# metadata
+# d.cn_top5_drug
+# 
+# d.tmp <- metadata %>%
+#   dplyr::select(depmap_id, stripped_cell_line_name, primary_disease,
+#                 subtype_disease, lineage, lineage_subtype) %>%
+#   right_join(d.cn_top5_drug, by = "depmap_id") %>% # gets rid of cell lines with no CN data
+#   dplyr::select(-cell_line) %>%
+#   rename(cell_line = stripped_cell_line_name)
+# d.tmp
+# 
+# d.DeKegel_top5_druggable
+# 
+# ## pivot DF longer so each gene in a pair is its own row
+# d.DeKegel_top5_druggable_genes <- d.DeKegel_top5_druggable %>%
+#   rename(A1_hgnc = A1, A2_hgnc = A2) %>%
+#   pivot_longer(cols = starts_with("A"),
+#                names_to = c("gene", ".value"),
+#                names_pattern = "A(.)_(.*)") %>%
+#   dplyr::select(prediction_rank:sorted_gene_pair,
+#                 gene:drug_tier, 
+#                 ensembl_pair:top_5_SL_all_screens)
+# d.DeKegel_top5_druggable_genes
+# 
+# ## add cell line, CN information to top SL and druggable paralog pair df
+# d.DeKegel_top5_druggable_genes_depmap_cn <- d.DeKegel_top5_druggable_genes %>%
+#   right_join(d.tmp, by = c("entrez" = "entrez_id")) 
+# d.DeKegel_top5_druggable_genes_depmap_cn
+
+
+
+
+
+```
+
+
+
+```{r}
+
+# ## make df to get A1 DepMap CN info
+# d.DeKegel_top5_druggable
+# d.tmp2 <- d.tmp %>%
+#   dplyr::select(-c(gene, gene_name))
+# d.tmp2
+# 
+# ## make df to add A2 DepMap CN info
+# d.tmp3 <- d.tmp2 %>%
+#   dplyr::select(depmap_id, entrez_id, log_copy_number) %>%
+#   unite(depmap_entrez_id, c(depmap_id, entrez_id), sep = "_")
+# d.tmp3
+# 
+# ## add cell line, CN info for each paralog to wide paralog DF
+# d.DeKegel_top5_druggable_depmap_cn <- d.DeKegel_top5_druggable %>%
+#   right_join(d.tmp2, by = c("A1_entrez" = "entrez_id")) %>%
+#   rename(A1_log_cn = log_copy_number) %>%
+#   unite(depmap_entrez_id, c(depmap_id, A2_entrez), sep = "_", remove = FALSE) %>% ## create new id column
+#   left_join(d.tmp3, by = "depmap_entrez_id") %>%
+#   rename(A2_log_cn = log_copy_number)
+# d.DeKegel_top5_druggable_depmap_cn
+
+```
+
+```{r}
+
+drug_metadata
+d.drug_sens_filtered
+
+## expand df so each drug target is its own row
+d.drug_sens_filtered_target <- d.drug_sens_filtered %>%
+  separate_rows(target)
+d.drug_sens_filtered_target
+
+```
+
+
+```{r}
+
+### Adding CN info to top 5% of SL pairs from De Kegel paper
+### Same as above 3 chunks but for all top 5% genes (no druggability filter)
+# d.DeKegel_top5_druggable
+
+d.DeKegel_top5 <- d.DeKegel %>%
+  filter(prediction_percentile < 5)
+d.DeKegel_top5
+
+d.tmp <- metadata %>%
+  ungroup() %>%
+  dplyr::select(depmap_id, stripped_cell_line_name, primary_disease,
+                subtype_disease, lineage, lineage_subtype) %>%
+  right_join(d.cn_top5_drug, by = "depmap_id") %>% # gets rid of cell lines with no CN data
+  dplyr::select(-c(cell_line, gene)) %>%
+  rename(cell_line = stripped_cell_line_name)
+d.tmp
+
+d.DeKegel_top5_genes <- d.DeKegel_top5 %>%
+  rename(A1_hgnc = A1, A2_hgnc = A2) %>%
+  pivot_longer(cols = starts_with("A"),
+               names_to = c("gene_pos", ".value"),
+               names_pattern = "A(.)_(.*)") %>%
+  dplyr::select(prediction_rank:sorted_gene_pair,
+                gene_pos:ensembl,
+                ensembl_pair:family_size)
+d.DeKegel_top5_genes
+
+
+## add cell line, CN information to top 5% predicted SL pair df
+d.DeKegel_top5_genes_depmap_cn <- d.DeKegel_top5_genes %>%
+  right_join(d.tmp, by = c("entrez" = "entrez_id")) %>%
+  rename(log_cn = log_copy_number)
+d.DeKegel_top5_genes_depmap_cn
+
+
+d.DeKegel_top5_genes_depmap_cn <- d.DeKegel_top5_genes_depmap_cn %>%
+  group_by(sorted_gene_pair, gene_name) %>%
+  mutate(cn_bin = ntile(log_cn, n = 4)) %>%
+  mutate(cn_bin = factor(cn_bin, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+d.DeKegel_top5_genes_depmap_cn
+
+
+# d.DeKegel_top5_druggable_depmap_cn
+
+## checking that it works
+# d.DeKegel_top5_genes_depmap_cn %>%
+#   filter(sorted_gene_pair == "HDAC1_HDAC2") %>%
+#   filter(cell_line == "NIHOVCAR3")
+
+## calculate CN ntiles
+
+
+```
+
+If I filter for the top 5th percentile of genes, I get 1,795 rows vs. 391 if we filter for Finan 2017 druggable *and* top 5th percentile. 
+
+
+```{r}
+
+
+## add DepMap drug sensitivity info
+
+# drug_metadata
+# d.drug_sens_filtered
+
+## expand df so each drug target is its own row
+d.drug_sens_filtered_target <- d.drug_sens_filtered %>%
+  separate_rows(target) %>%
+  dplyr::select(depmap_id, cell_line, compound, dependency, name, dose, moa, target) %>%
+  rename(compound_name = name)
+d.drug_sens_filtered_target
+
+d.DeKegel_top5_genes_depmap_cn_drug <- left_join(d.DeKegel_top5_genes_depmap_cn, 
+                                                 d.drug_sens_filtered_target,
+                                                 by = c("depmap_id" = "depmap_id", "gene_name" = "target"))
+d.DeKegel_top5_genes_depmap_cn_drug
+
+
+## CHECK THAT THIS ACTUALLY WORKED!!!!
+
+```
+
+#### Expr DFs
+
+
+### Test analyses
+###### CDK4/6 test case
+```{r}
+
+# d.Broad_drug_info %>%
+#   dplyr::filter(grepl("CDK4", target))
+# 
+# d.Broad_drug_info
+# 
+# d.Broad_drug_info %>%
+#   dplyr::filter(grepl(str_c(top5_druggable_genes_hgnc, collapse = "|"), target))
+# 
+# drug_list <- d.Broad_drug_info %>%
+#   dplyr::filter(grepl(str_c(top5_druggable_genes_hgnc, collapse = "|"), target)) %>%
+#   distinct(column_name) %>%
+#   dplyr::pull(column_name)
+# 
+# drug_list
+# 
+# # str_c(top5_druggable_genes_hgnc, collapse = "|")
+# 
+# # drug_sensitivity
+# 
+# d.drug_sens_filtered <- drug_sensitivity %>%
+#   dplyr::filter(compound %in% drug_list) %>%
+#   left_join(d.Broad_drug_info, by = c("compound" = "column_name"))
+# d.drug_sens_filtered
+
+```
+
+```{r}
+
+## test case
+d.drug_sens_filtered %>%
+  filter(grepl("CDK4", target))
+
+d.drug_CDK4 <- d.drug_sens_filtered %>%
+  filter(grepl("CDK4", target))
+
+d.drug_CDK6 <- d.drug_sens_filtered %>%
+  filter(grepl("CDK6", target))
+
+d.expr_top5_drug %>%
+  filter(gene_name == "CDK4" | gene_name == "CDK6") %>%
+  ggplot(aes(x = rna_expression, fill = gene_name)) +
+  geom_histogram(binwidth = 0.5, color = "black", alpha = 0.75)+
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") + 
+  facet_wrap(~gene_name)
+
+d.expr_CDK4 <- d.expr_top5_drug %>%
+  filter(gene_name == "CDK4") %>%
+  group_by(gene_name) %>%
+  mutate(bin_tpm = ntile(rna_expression, 4)) %>%
+  mutate(bin_tpm = factor(bin_tpm, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+d.expr_CDK4
+
+d.expr_CDK6 <- d.expr_top5_drug %>%
+  filter(gene_name == "CDK6") %>%
+  group_by(gene_name) %>%
+  mutate(bin_tpm = ntile(rna_expression, 4)) %>%
+  mutate(bin_tpm = factor(bin_tpm, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+d.expr_CDK6
+
+d.CDK4_expr_CDK6_drug <- left_join(d.expr_CDK4, d.drug_CDK6, by = "depmap_id") %>%
+  filter(!is.na(compound))
+d.CDK4_expr_CDK6_drug
+
+d.CDK6_expr_CDK4_drug <- left_join(d.expr_CDK6, d.drug_CDK4, by = "depmap_id") %>%
+  filter(!is.na(compound))
+d.CDK6_expr_CDK4_drug
+
+# d.cn_top5_drug %>%
+#   filter(gene_name == "CDK4" | gene_name == "CDK6") %>%
+#   ggplot(aes(x = log_copy_number)) +
+#   geom_histogram()
+
+```
+
+
+
+```{r}
+
+## CDK4 expression vs. drugs targeting CDK6
+
+d.CDK4_expr_CDK6_drug
+ggplot(d.CDK4_expr_CDK6_drug, aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.CDK4_expr_CDK6_drug %>%
+  filter(grepl("BREAST", cell_line.x)) %>%
+  ggplot(aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.CDK4_expr_CDK6_drug %>%
+  filter(bin_tpm %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+d.CDK4_expr_CDK6_drug %>%
+  group_by(bin_tpm) %>%
+  filter(!is.na(dependency)) %>%
+  summarize(median = median(rna_expression))
+
+```
+
+
+```{r}
+
+## CDK6 expression vs. drugs targeting CDK4
+
+d.CDK6_expr_CDK4_drug
+ggplot(d.CDK6_expr_CDK4_drug, aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.CDK6_expr_CDK4_drug %>%
+  filter(bin_tpm %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+
+d.CDK6_expr_CDK4_drug %>%
+  filter(grepl("BREAST", cell_line.x)) %>%
+  ggplot(aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+# d.CDK6_expr_CDK4_drug %>%
+#   filter(grepl("BREAST", cell_line.x)) %>%
+#   filter(bin_tpm %in% c(1, 4)) %>%
+#   group_by(name) %>%
+#   summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+d.CDK6_expr_CDK4_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  ggplot(aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+```
+
+```{r}
+
+d.cn_top5_drug %>%
+  filter(gene_name == "CDK4" | gene_name == "CDK6") %>%
+  ggplot(aes(x = log_copy_number, fill = gene_name)) +
+  geom_histogram(binwidth = 0.25, color = "black", alpha = 0.75)+
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") + 
+  facet_wrap(~gene_name)
+
+d.cn_CDK4 <- d.cn_top5_drug %>%
+  filter(gene_name == "CDK4") %>%
+  group_by(gene_name) %>%
+  mutate(bin_cn = ntile(log_copy_number, 4)) %>%
+  mutate(bin_cn = factor(bin_cn, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+d.cn_CDK4
+
+d.cn_CDK6 <- d.cn_top5_drug %>%
+  filter(gene_name == "CDK6") %>%
+  group_by(gene_name) %>%
+  mutate(bin_cn = ntile(log_copy_number, 4)) %>%
+  mutate(bin_cn = factor(bin_cn, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+d.cn_CDK6
+
+d.CDK4_cn_CDK6_drug <- left_join(d.cn_CDK4, d.drug_CDK6, by = "depmap_id") %>%
+  filter(!is.na(compound))
+d.CDK4_cn_CDK6_drug
+
+d.CDK6_cn_CDK4_drug <- left_join(d.cn_CDK6, d.drug_CDK4, by = "depmap_id") %>%
+  filter(!is.na(compound))
+d.CDK6_cn_CDK4_drug
+
+```
+
+```{r}
+
+d.CDK4_cn_CDK6_drug
+ggplot(d.CDK4_cn_CDK6_drug, aes(x = bin_cn, y = dependency, fill = bin_cn)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.CDK4_cn_CDK6_drug %>%
+  filter(grepl("BREAST", cell_line.x)) %>%
+  ggplot(aes(x = bin_cn, y = dependency, fill = bin_cn)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.CDK4_cn_CDK6_drug %>%
+  filter(bin_cn %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_cn, alternative = "greater")$p.value)
+
+d.CDK4_cn_CDK6_drug %>%
+  group_by(bin_cn) %>%
+  filter(!is.na(dependency)) %>%
+  summarize(median = median(log_copy_number))
+
+d.CDK6_cn_CDK4_drug
+ggplot(d.CDK6_cn_CDK4_drug, aes(x = bin_cn, y = dependency, fill = bin_cn)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.CDK6_cn_CDK4_drug %>%
+  filter(grepl("BREAST", cell_line.x)) %>%
+  ggplot(aes(x = bin_cn, y = dependency, fill = bin_cn)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.CDK6_cn_CDK4_drug %>%
+  filter(grepl("BREAST", cell_line.x))%>%
+  filter(bin_cn %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_cn, alternative = "greater")$p.value)
+
+
+```
+
+###### Lung test cases
+```{r}
+
+d.drug_sens_filtered %>%
+  filter(grepl("lung", indication)) %>%
+  dplyr::select(compound,name:phase) %>%
+  distinct(compound, .keep_all = TRUE)
+
+```
+
+```{r}
+
+## RRM2, RRM2B w/ gemcitabine (targets RRM2)
+gene1 <- "RRM2"
+gene2 <- "RRM2B"
+d.cn_top5_drug %>%
+  filter(gene_name == gene1 | gene_name == gene2) %>%
+  ggplot(aes(x = log_copy_number, fill = gene_name)) +
+  geom_histogram(binwidth = 0.1, color = "black", alpha = 0.75)+
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") + 
+  facet_wrap(~gene_name)
+
+d.expr_top5_drug %>%
+  filter(gene_name == gene1 | gene_name == gene2) %>%
+  ggplot(aes(x = rna_expression, fill = gene_name)) +
+  geom_histogram(binwidth = 0.5, color = "black", alpha = 0.75)+
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") + 
+  facet_wrap(~gene_name)
+
+# d.drug_gene1 <- d.drug_sens_filtered %>%
+#   filter(grepl(gene1, target))
+# d.drug_gene1
+
+# d.drug_gene2 <- d.drug_sens_filtered %>%
+#   filter(grepl(gene2, target))
+# d.drug_gene2
+
+d.drug_gene1 <- d.drug_sens_filtered %>%
+  filter(name == "gemcitabine")
+
+d.expr_gene1 <- d.expr_top5_drug %>%
+  filter(gene_name == gene1) %>%
+  group_by(gene_name) %>%
+  mutate(bin_tpm = ntile(rna_expression, 4)) %>%
+  mutate(bin_tpm = factor(bin_tpm, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+
+d.expr_gene2 <- d.expr_top5_drug %>%
+  filter(gene_name == gene2) %>%
+  group_by(gene_name) %>%
+  mutate(bin_tpm = ntile(rna_expression, 4)) %>%
+  mutate(bin_tpm = factor(bin_tpm, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+
+# d.gene1_expr_gene2_drug <- left_join(d.expr_gene1, d.drug_gene2, by = "depmap_id") %>%
+#   filter(!is.na(compound))
+
+d.gene2_expr_gene1_drug <- left_join(d.expr_gene2, d.drug_gene1, by = "depmap_id") %>%
+  filter(!is.na(compound))
+
+ggplot(d.gene2_expr_gene1_drug, aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene2_expr_gene1_drug %>%
+  filter(bin_tpm %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+d.gene2_expr_gene1_drug_lung <- d.expr_top5_drug %>%
+  filter(grepl("LUNG", cell_line)) %>%
+  filter(gene_name == gene2) %>%
+  group_by(gene_name) %>%
+  mutate(bin_tpm = ntile(rna_expression, 4)) %>%
+  mutate(bin_tpm = factor(bin_tpm, levels = c(4, 3, 2, 1))) %>%
+  ungroup() %>%
+  left_join(d.drug_gene1, by = "depmap_id") %>%
+  filter(!is.na(compound))
+
+d.expr_top5_drug
+
+d.gene2_expr_gene1_drug_lung %>%
+  ggplot(aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene2_expr_gene1_drug_lung %>%
+  filter(bin_tpm %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+```
+
+
+```{r}
+
+
+## TUBB, TUBB1 and vindesine (targets both genes)
+gene1 <- "TUBB"
+gene2 <- "TUBB1"
+d.cn_top5_drug %>%
+  filter(gene_name == gene1 | gene_name == gene2) %>%
+  ggplot(aes(x = log_copy_number, fill = gene_name)) +
+  geom_histogram(binwidth = 0.1, color = "black", alpha = 0.75)+
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") + 
+  facet_wrap(~gene_name)
+
+d.expr_top5_drug %>%
+  filter(gene_name == gene1 | gene_name == gene2) %>%
+  ggplot(aes(x = rna_expression, fill = gene_name)) +
+  geom_histogram(binwidth = 0.5, color = "black", alpha = 0.75)+
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") + 
+  facet_wrap(~gene_name)
+
+d.drug_gene1 <- d.drug_sens_filtered %>%
+  filter(name == "vindesine")
+
+d.drug_gene2 <- d.drug_sens_filtered %>%
+  filter(name == "vindesine")
+
+d.expr_gene1 <- d.expr_top5_drug %>%
+  filter(gene_name == gene1) %>%
+  group_by(gene_name) %>%
+  mutate(bin_tpm = ntile(rna_expression, 4)) %>%
+  mutate(bin_tpm = factor(bin_tpm, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+
+d.expr_gene2 <- d.expr_top5_drug %>%
+  filter(gene_name == gene2) %>%
+  group_by(gene_name) %>%
+  mutate(bin_tpm = ntile(rna_expression, 4)) %>%
+  mutate(bin_tpm = factor(bin_tpm, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+
+d.gene1_expr_gene2_drug <- left_join(d.expr_gene1, d.drug_gene2, by = "depmap_id") %>%
+  filter(!is.na(compound))
+
+d.gene2_expr_gene1_drug <- left_join(d.expr_gene2, d.drug_gene1, by = "depmap_id") %>%
+  filter(!is.na(compound))
+
+## TUBB1 expr, TUBB dependency
+ggplot(d.gene2_expr_gene1_drug, aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene2_expr_gene1_drug %>%
+  filter(bin_tpm %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+
+d.gene2_expr_gene1_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  ggplot(aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene2_expr_gene1_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  filter(bin_tpm %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+## TUBB expr, TUBB1 dependency
+ggplot(d.gene1_expr_gene2_drug, aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene1_expr_gene2_drug %>%
+  filter(bin_tpm %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+
+d.gene1_expr_gene2_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  ggplot(aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene1_expr_gene2_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  filter(bin_tpm %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+```
+
+```{r}
+
+## TOP2A, TOP2B and etoposide (targets both genes)
+gene1 <- "TOP2A"
+gene2 <- "TOP2B"
+d.cn_top5_drug %>%
+  filter(gene_name == gene1 | gene_name == gene2) %>%
+  ggplot(aes(x = log_copy_number, fill = gene_name)) +
+  geom_histogram(binwidth = 0.1, color = "black", alpha = 0.75)+
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") + 
+  facet_wrap(~gene_name)
+
+d.expr_top5_drug %>%
+  filter(gene_name == gene1 | gene_name == gene2) %>%
+  ggplot(aes(x = rna_expression, fill = gene_name)) +
+  geom_histogram(binwidth = 0.5, color = "black", alpha = 0.75)+
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") + 
+  facet_wrap(~gene_name)
+
+d.drug_gene1 <- d.drug_sens_filtered %>%
+  filter(name == "etoposide")
+
+d.drug_gene2 <- d.drug_sens_filtered %>%
+  filter(name == "etoposide")
+
+d.cn_gene1 <- d.cn_top5_drug %>%
+  filter(gene_name == gene1) %>%
+  group_by(gene_name) %>%
+  mutate(bin_cn = ntile(log_copy_number, 4)) %>%
+  mutate(bin_cn = factor(bin_cn, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+
+d.cn_gene2 <- d.cn_top5_drug %>%
+  filter(gene_name == gene2) %>%
+  group_by(gene_name) %>%
+  mutate(bin_cn = ntile(log_copy_number, 4)) %>%
+  mutate(bin_cn = factor(bin_cn, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+
+d.gene1_cn_gene2_drug <- left_join(d.cn_gene1, d.drug_gene2, by = "depmap_id") %>%
+  filter(!is.na(compound))
+
+d.gene2_cn_gene1_drug <- left_join(d.cn_gene2, d.drug_gene1, by = "depmap_id") %>%
+  filter(!is.na(compound))
+
+## TOP2A cn, TOP2B dependency
+ggplot(d.gene2_cn_gene1_drug, aes(x = bin_cn, y = dependency, fill = bin_cn)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene2_cn_gene1_drug %>%
+  filter(bin_cn %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_cn, alternative = "greater")$p.value)
+
+
+d.gene2_cn_gene1_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  ggplot(aes(x = bin_cn, y = dependency, fill = bin_cn)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene2_cn_gene1_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  filter(bin_cn %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_cn, alternative = "greater")$p.value)
+
+## TOP2B cn, TOP2A dependency
+ggplot(d.gene1_cn_gene2_drug, aes(x = bin_cn, y = dependency, fill = bin_cn)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene1_cn_gene2_drug %>%
+  filter(bin_cn %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_cn, alternative = "greater")$p.value)
+
+
+d.gene1_cn_gene2_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  ggplot(aes(x = bin_cn, y = dependency, fill = bin_cn)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene1_cn_gene2_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  filter(bin_cn %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_cn, alternative = "greater")$p.value)
+
+d.gene1_cn_gene2_drug %>%
+  group_by(bin_cn) %>%
+  summarize("median_group_cn" = median(log_copy_number))
+
+```
+
+##### Secondary screen
+

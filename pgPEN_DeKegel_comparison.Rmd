@@ -93,7 +93,7 @@ d.Parrish_DeKegel
 
 ```
 
-### Parrish vs. De Kegel
+### pgPEN genes + De Kegel annotations
 
 ```{r}
 
@@ -153,7 +153,7 @@ d.Parrish_DeKegel %>%
 
 ```
 
-
+#### Family size
 ```{r}
 
 d.Parrish_DeKegel %>%
@@ -173,7 +173,7 @@ d.Parrish_DeKegel %>%
 
 This analysis showed that paralogs with >1 other family-member were less likely to be called synthetic lethal in our dataset, which makes sense given how we filtered the paralogs: we did not select only duplicate genes, Alice just filtered for those with ≥50% amino acid sequence identity with only one other paralog in the genome. Therefore, paralog pairs wtih other family-members with <50% sequence identity were included in our library. 
 
-
+#### Top 5% predicted
 ```{r}
 
 ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = top_5_percent_flag)) +
@@ -191,7 +191,7 @@ ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = top_5_percent_flag)) +
 
 This analysis showed that our top hits from the SL screen are likely real, given that paralogs that are SL in ≥1 cell line are much more likely to be in the top 5th percentile of predicted broadly SL paralogs than those that were SL in neither cell line. 
 
-
+#### In a complex
 ```{r}
 
 ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = either_in_complex)) +
@@ -205,7 +205,7 @@ ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = either_in_complex)) +
 
 This analysis shows that paralogs that are SL in ≥1 cell line are slightly more likely to be in a complex than those that aren't. 
 
-
+#### Interact
 ```{r}
 
 ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = interact)) +
@@ -219,7 +219,7 @@ ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = interact)) +
 
 This analysis shows that paralogs that physically interact are more likely to be SL in ≥1 cell line compared to those that were SL in neither cell line. 
 
-
+#### WGD vs. SSD
 ```{r}
 
 ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = WGD)) +
@@ -230,10 +230,30 @@ ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = WGD)) +
         axis.ticks = element_line(color = "black"))
 
 ```
+```{r}
+
+## pretty version for PPT
+ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = WGD)) +
+  geom_bar(position = "fill", width = 0.75, color = "black") +
+  theme_classic(base_size = 12) +
+  scale_fill_manual(values = c("#31a354", "#8856a7"), labels = c("SSD", "WGD")) +
+  scale_x_discrete(labels = c("SL in neither", "SL in one", "SL in both")) +
+  ylab("Proportion") +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"), 
+        legend.title = element_blank(), 
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 12))
+# ggsave(file.path(out_dir, "pgPEN_paralog_type_vs_SL_group.pdf"),
+#        height = 3.5, width = 5, useDingbats = FALSE)
+
+```
 
 This analysis shows that most of the paralogs in our library are whole genome duplicates (WGD). This was also shown in the De Kegel et al. 2021 preprint. This also shows that paralogs that were SL in both cell lines were enriched for WGD genes. 
 
 
+#### Age
 ```{r}
 
 ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, y = mean_age, fill = broader_SL_flag)) +
@@ -247,7 +267,38 @@ ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, y = mean_age, fill = broader_
 
 ```
 
+```{r}
+
+## pretty version for PPT
+ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, y = mean_age, fill = broader_SL_flag)) +
+  # geom_violin(alpha = 0.75) + 
+  geom_boxplot(width = 0.7) +
+  theme_classic(base_size = 12) +
+  scale_fill_manual(values = c("#aaaaaa", "#6baed6", "#2171b5")) +
+  scale_x_discrete(labels = c("SL in neither", "SL in one", "SL in both")) +
+  ylab(bquote("Phylogenetic age"~(x10^6))) +
+  theme(legend.position = "none", 
+        aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 12))
+# ggsave(file.path(out_dir, "pgPEN_paralog_age_vs_SL_group.pdf"),
+#        height = 3.5, width = 5, useDingbats = FALSE)
+
+```
 This analysis shows that SL paralogs were likely to be older. This makes sense in the context of WGD genes being more likely to be SL (see De Kegel preprint, yeast papers). 
+
+```{r}
+
+## stats
+kruskal.test(mean_age ~ broader_SL_flag, data = d.Parrish_DeKegel)
+
+pairwise.wilcox.test(d.Parrish_DeKegel$mean_age, d.Parrish_DeKegel$broader_SL_flag, 
+                     p.adjust.method = "BH")
+
+
+```
 
 
 ```{r}
@@ -265,7 +316,7 @@ ggplot(d.Parrish_DeKegel, aes(x = WGD, y = mean_age, fill = broader_SL_flag)) +
 ```
 
 
-
+#### PPI overlap
 ```{r}
 
 ggplot(d.Parrish_DeKegel_high_conf, aes(x = mean_GI_score, y = fet_ppi_overlap)) + 
@@ -285,7 +336,7 @@ This analysis compares the mean GI score across PC9 and HeLa cell lines to the P
 ## Write output
 ```{r}
 
-write_rds(d.Parrish_DeKegel, file.path(out_dir, "d.Parrish_DeKegel"))
+# write_rds(d.Parrish_DeKegel, file.path(out_dir, "d.Parrish_DeKegel"))
 
 ```
 
