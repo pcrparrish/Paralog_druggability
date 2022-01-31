@@ -5,10 +5,10 @@ date: "2022-01-07"
 output: html_document
 ---
 
-## To Do
+# To Do
 * update depmap version - use more recent data (I am currently using 19Q1)
 
-## Setup
+# Setup
 
 ```{r setup, include=FALSE}
 
@@ -26,7 +26,7 @@ library(ggprism) # another significance bar package...
 ```
 
 
-### Assign variables
+## Assign variables
 ```{r}
 
 date <- Sys.Date()
@@ -47,7 +47,7 @@ out_dir <- file.path(base_dir, "02_output_files")
 ```
 
 
-### Import files
+## Import files
 
 ```{r, message = FALSE}
 
@@ -57,7 +57,6 @@ d.Parrish <- read_rds(file.path(in_dir, "d.PC9_v_HeLa_paralog_target_GI_wide_fla
 
 d.Dede <- read_tsv(file.path(in_dir, "Dede_Table_S2.txt"))
 
-d.druggable <- read_tsv(file.path(in_dir, "finan_druggability_with_ensembl_id.txt"))
 
 d.Broad_drug_info <- read_csv(file.path(in_dir, "primary-screen-replicate-collapsed-treatment-info.csv"))
 
@@ -67,29 +66,22 @@ d.Broad_secondary_doses <- read_csv(file.path(in_dir, "secondary-screen-dose-res
 
 ```
 
-## Analysis
+# Analysis
 
-### Get Ensembl IDs and merge
+## Get Ensembl IDs and merge
 
 ```{r}
 
 d.DeKegel <- d.DeKegel %>%
-  unite(ensembl_pair, c(A1_ensembl, A2_ensembl), sep = "_", remove = FALSE) 
+  unite(ensembl_pair, c(A1_ensembl, A2_ensembl), sep = "_", remove = FALSE) %>%
+  unite(entrez_pair, c(A1_entrez, A2_entrez), sep = "_", remove = FALSE)
+d.DeKegel
 
 d.Parrish <- d.Parrish %>%
   rename(ensembl_pair_1 = ensembl_paralog_pair) %>%
   unite(ensembl_pair_2, c(target2_ensembl_id, target1_ensembl_id), sep = "_", remove = FALSE)
 
 ```
-
-```{r}
-
-# d.Dede %>%
-#   separate(gene_pair, c("gene1", "gene2"), sep = "_") %>%
-  
-
-```
-
 
 ```{r}
 
@@ -104,128 +96,33 @@ d.Parrish_DeKegel
 
 ```
 
-
 ```{r}
 
-d.Parrish_DeKegel <- d.Parrish_DeKegel %>%
-  mutate(top_5_percent_flag = ifelse(prediction_percentile < 5, TRUE, FALSE)) %>%
-  mutate(comp_validated_flag = ifelse(broad_SL_flag != "SL_in_neither" & 
-                                        top_5_percent_flag == TRUE, TRUE, FALSE)) 
+## get list of paralog pairs that are shared between pgPEN and De Kegel
+Parrish_DeKegel_ensembl_pairs <- d.Parrish_DeKegel %>%
+  dplyr::select(ensembl_pair_1, ensembl_pair_2) %>%
+  pivot_longer(c(ensembl_pair_1, ensembl_pair_2)) %>%
+  pull(value)
+# Parrish_DeKegel_ensembl_pairs
 
-d.Parrish_DeKegel_high_conf <- d.Parrish_DeKegel %>%
-  filter(broader_SL_flag == "SL_in_both" & comp_validated_flag == TRUE) %>%
-  rowwise() %>%
-  mutate(mean_GI_score = mean(c(PC9_gene_gene_GI_score, HeLa_gene_gene_GI_score)))
-d.Parrish_DeKegel_high_conf
-
-d.Parrish_DeKegel_medium_conf <- d.Parrish_DeKegel %>%
-  filter(comp_validated_flag == TRUE)
-
-```
-
-### Finan druggability
-
-Intersect high-confidence hits (screens + depmap predictions?) with druggability...
-```{r}
-
-d.druggable
-d.DeKegel
-
-d.tmp <- d.druggable %>%
-  dplyr::select(ensembl_gene_id, druggability_tier)
-
-d.DeKegel_drug <- left_join(d.DeKegel, d.tmp, by = c("A1_ensembl" = "ensembl_gene_id")) %>%
-  rename(A1_drug_tier = druggability_tier) %>%
-  left_join(d.tmp, by = c("A2_ensembl" = "ensembl_gene_id")) %>%
-  rename(A2_drug_tier = druggability_tier)
-d.DeKegel_drug
-
-d.DeKegel_drug <- d.DeKegel_drug %>%
-  mutate(druggable_flag = case_when(
-    is.na(A2_drug_tier) ~ FALSE,
-    is.na(A2_drug_tier) ~ FALSE,
-    TRUE ~ TRUE), 
-    top_5_percent = ifelse(prediction_percentile < 5, TRUE, FALSE)) %>%
-  mutate(top_5_SL_ge_1_screen = case_when(
-      top_5_percent == TRUE & n_screens_SL > 0 ~ TRUE,
-      TRUE ~ FALSE)) %>%
-  mutate(SL_screen_ratio = n_screens_SL / n_screens) %>%
-  mutate(top_5_SL_all_screens = case_when(
-    top_5_percent == TRUE & SL_screen_ratio == 1 ~ TRUE,
-    TRUE ~ FALSE))
-
-```
-
-```{r}
-
-## druggable & top 5th percentile
-d.DeKegel_drug %>%
-  group_by(top_5_percent, druggable_flag) %>%
-  summarize(n = n())
-
-d.DeKegel_drug %>%
-  filter(top_5_percent == TRUE) %>%
-  filter(druggable_flag == TRUE)
-
-## druggable, top 5th percentile, and SL in ≥1 screen
-d.DeKegel_drug %>%
-  group_by(top_5_SL_ge_1_screen, druggable_flag) %>%
-  summarize(n = n())
-
-d.DeKegel_drug %>%
-  filter(top_5_SL_ge_1_screen == TRUE) %>%
-  filter(druggable_flag == TRUE)
-
-## druggable, top 5th percentile, and SL in all screens 
-d.DeKegel_drug %>%
-  group_by(top_5_SL_all_screens, druggable_flag) %>%
-  summarize(n = n())
-
-d.DeKegel_drug %>%
-  filter(top_5_SL_all_screens == TRUE) %>%
-  filter(druggable_flag == TRUE)
-
-```
-
-Next, since there are not many druggable paralogs that have been SL in multiple screens, I decided to look at the proportion of overall paralogs included in the De Kegel study that were screened at all: 
-```{r}
+## add a flag to indicate whether a given pair is included in pgPEN or not
+d.DeKegel <- d.DeKegel %>%
+  mutate(pgPEN_flag = ifelse(ensembl_pair %in% Parrish_DeKegel_ensembl_pairs, TRUE, FALSE)) 
 
 d.DeKegel %>%
-  mutate(screened_flag = ifelse(n_screens >= 1, TRUE, FALSE)) %>%
-  ggplot(aes(x = screened_flag, fill = screened_flag)) +
-  geom_bar(position = "identity", color = "black") +
-  theme_classic () + 
-  theme(aspect.ratio = 0.75, 
-        axis.text = element_text(color = "black"),
-        axis.ticks = element_line(color = "black"))
-
-d.DeKegel %>%
-  mutate(screened_flag = ifelse(n_screens >= 1, TRUE, FALSE)) %>%
-  group_by(screened_flag) %>%
-  summarize(prop_screened = (n()/nrow(d.DeKegel))) %>%
-  mutate(group_label = paste0(round(100 * prop_screened, 2), "%")) %>%
-  ungroup() %>%
-  arrange(prop_screened) %>%
-  ggplot(aes(x = "", y = prop_screened, fill = screened_flag)) +
-  geom_bar(stat = "identity", width = 1, color = "white") +
-  coord_polar("y", start = 0) +
-  theme_void() +
-  geom_text(aes(x = 1, y = cumsum(prop_screened) - prop_screened/2, label = group_label))
+  group_by(pgPEN_flag) %>%
+  summarize(n = n())
 
 ```
-So only ~5% of all paralogs have been included in CRISPR screens to date. This does not include the new loss of Y paper that came out, but that screened a limited number of druggable genes I think. 
 
-
-### DepMap drug data
+## DepMap drug data
 Also see: https://depmap.org/repurposing/
 ```{r}
 
-# eh <- ExperimentHub()
-# eh.depmap <- query(eh, "depmap")
+eh <- ExperimentHub()
+eh.depmap <- query(eh, "depmap")
 # 
-# # drug_sensitivity <- eh[["EH3087"]]
 # 
-# # metadata <- read_rds(file.path(in_dir, "depmap_metadata"))
 # 
 # foo = tibble("eh_id" = names(eh.depmap),
 #              "title" = eh.depmap$title)
@@ -238,12 +135,12 @@ Also see: https://depmap.org/repurposing/
 # ## use this the first time only
 # crispr <- eh[["EH6118"]]
 # mut_calls <- eh[["EH6121"]]
-# metadata <- eh[["EH6122"]]
-# cn <- eh[["EH6119"]]
-# expr <- eh[["EH6120"]]
+metadata <- eh[["EH6122"]]
+cn <- eh[["EH6119"]]
+expr <- eh[["EH6120"]]
 # 
-# drug_sensitivity <- eh[["EH3087"]]
-# drug_metadata <- eh[["EH3086"]]
+drug_sensitivity <- eh[["EH3087"]]
+drug_metadata <- eh[["EH3086"]]
 # ## note: drug info is from 19Q4, these are 19Q3
 # 
 # ## read in RDS files
@@ -314,9 +211,9 @@ Cutoffs to apply:
 * expression: >1.5 log2(TPM) = expressed
 * copy number: >1.5 log_copy_number = copy gain, < 0.5??? = copy loss
 
-#### Get gene list
+### Get gene list
 
-##### De Kegel top 5%
+#### De Kegel top 5%
 ```{r}
 
 DeKegel_top5_genes_entrez <- d.DeKegel %>%
@@ -367,34 +264,9 @@ DeKegel_top5_genes_hgnc <- d.DeKegel %>%
 
 ```
 
-##### Top 5% and druggable
-```{r}
 
-d.DeKegel_top5_druggable <- d.DeKegel_drug %>%
-  filter(top_5_percent == TRUE) %>%
-  filter(druggable_flag == TRUE)
-d.DeKegel_top5_druggable
 
-d.DeKegel_top5_druggable <- d.DeKegel_drug %>%
-  filter(top_5_percent == TRUE) %>%
-  filter(druggable_flag == TRUE)
-d.DeKegel_top5_druggable
-
-top5_druggable_genes_entrez <- d.DeKegel_top5_druggable %>%
-  dplyr::select(A1_entrez, A2_entrez) %>%
-  gather() %>%
-  distinct(value) %>%
-  pull(value)
-
-top5_druggable_genes_hgnc <- d.DeKegel_top5_druggable %>%
-  dplyr::select(A1, A2) %>%
-  gather() %>%
-  distinct(value) %>%
-  pull(value)
-
-```
-
-##### Write output
+##### Write output (retire)
 ```{r}
 
 # metadata
@@ -454,18 +326,400 @@ top5_druggable_genes_hgnc <- d.DeKegel_top5_druggable %>%
 ## 21Q2 datasets
 metadata <- read_rds(file.path(out_dir, "d.metadata_21Q2"))
 d.expr_top5 <- read_rds(file.path(out_dir, "d.expr_21Q2_DeKegel_top5"))
-d.expr_top5_drug <- read_rds(file.path(out_dir, "d.expr_21Q2_DeKegel_top5_druggable"))
+# d.expr_top5_drug <- read_rds(file.path(out_dir, "d.expr_21Q2_DeKegel_top5_druggable"))
 d.cn_top5 <- read_rds(file.path(out_dir, "d.cn_21Q2_DeKegel_top5"))
-d.cn_top5_drug <- read_rds(file.path(out_dir, "d.cn_21Q2_DeKegel_top5_druggable"))
-d.mut_top5 <- read_rds(file.path(out_dir, "d.mut_21Q2_DeKegel_top5"))
-d.mut_top5_drug <- read_rds(file.path(out_dir, "d.mut_21Q2_DeKegel_top5_druggable"))
+# d.cn_top5_drug <- read_rds(file.path(out_dir, "d.cn_21Q2_DeKegel_top5_druggable"))
+# d.mut_top5 <- read_rds(file.path(out_dir, "d.mut_21Q2_DeKegel_top5"))
+# d.mut_top5_drug <- read_rds(file.path(out_dir, "d.mut_21Q2_DeKegel_top5_druggable"))
 
 ## 19Q3 datasets
-drug_metadata <- read_rds(file.path(out_dir, "d.metadata_19Q3"))
-d.drug_sens_filtered <- read_rds(file.path(out_dir, "d.drug_sens_19Q3_DeKegel_top5_druggable"))
+# drug_metadata <- read_rds(file.path(out_dir, "d.metadata_19Q3"))
+# d.drug_sens_filtered <- read_rds(file.path(out_dir, "d.drug_sens_19Q3_DeKegel_top5_druggable"))
 
 ```
 
+
+## Paralog + drug info
+### Get top 5% genes
+```{r}
+
+### All top 5% genes (no druggability filter)
+# d.DeKegel_top5_druggable
+
+d.DeKegel_top5 <- d.DeKegel %>%
+  filter(prediction_percentile < 5) %>%
+  rename(A1_hgnc = A1, A2_hgnc = A2) %>%
+  dplyr::select(prediction_rank:family_size,
+                pgPEN_flag)
+d.DeKegel_top5
+
+d.DeKegel_top5_genes <- d.DeKegel_top5 %>%
+  pivot_longer(cols = starts_with("A"),
+               names_to = c("gene_pos", ".value"),
+               names_pattern = "A(.)_(.*)")
+d.DeKegel_top5_genes
+
+# DeKegel_top5_genes_hgnc
+
+```
+
+#### Add drug info
+```{r}
+
+drug_metadata
+drug_sensitivity
+
+## get annotations for drugs that target De Kegel top 5% genes
+d.Broad_drug_info_DeKegel_top5 <- d.Broad_drug_info %>%
+  dplyr::filter(grepl(str_c(DeKegel_top5_genes_hgnc, collapse = "|"), target))
+d.Broad_drug_info_DeKegel_top5
+
+## filtering join to get drug sensitivity data only for drugs targeting top 5% genes
+## also adds drug annotations
+d.drug_sens_DeKegel_top5 <- drug_sensitivity %>%
+  inner_join(d.Broad_drug_info_DeKegel_top5, by = c("compound" = "column_name"))
+d.drug_sens_DeKegel_top5
+
+## reformat cell line metadata and add to filtered drug sensitivity DF
+d.drug_sens_DeKegel_top5 <- metadata %>%
+  dplyr::select(depmap_id, stripped_cell_line_name, primary_disease,
+                subtype_disease, lineage, lineage_subtype) %>%
+  right_join(d.drug_sens_DeKegel_top5, by = "depmap_id") %>%
+  dplyr::select(-c(cell_line, screen_id, disease.area:phase)) %>%
+  rename(cell_line = stripped_cell_line_name, 
+         compound_name = name,
+         compound_id = compound) 
+d.drug_sens_DeKegel_top5
+
+## separate out DF so each target is on its own line
+d.drug_sens_DeKegel_top5_target <- d.drug_sens_DeKegel_top5 %>%
+  separate_rows(target)
+d.drug_sens_DeKegel_top5_target
+
+```
+
+```{r}
+
+## join DeKegel top 5% DF with filtered drug sensitivity DF
+
+d.DeKegel_top5_genes_drug_sens <- d.drug_sens_DeKegel_top5_target <- d.DeKegel_top5_genes %>%
+  inner_join(d.drug_sens_DeKegel_top5_target, by = c("hgnc" = "target"))
+d.DeKegel_top5_genes_drug_sens
+
+```
+
+#### Rm double-targeting drugs
+```{r}
+
+## remove 2nd hit for drugs that target both paralogs
+
+## check for drugs that target both members of a pair
+d.DeKegel_top5_genes_drug_sens %>%
+  distinct(sorted_gene_pair, compound_id, gene_pos, .keep_all = TRUE) %>%
+  group_by(sorted_gene_pair, compound_id) %>%
+  summarize(n = n()) %>%
+  filter(n >1)
+
+## get list of double-targeting gene pair and compound names
+double_targeting_drugs <- d.DeKegel_top5_genes_drug_sens %>%
+  distinct(sorted_gene_pair, compound_id, gene_pos, .keep_all = TRUE) %>%
+  group_by(sorted_gene_pair, compound_id) %>%
+  summarize(n = n()) %>%
+  filter(n >1) %>%
+  unite("double_targeting_compounds", c("sorted_gene_pair", "compound_id")) %>%
+  distinct(double_targeting_compounds) %>%
+  pull()
+
+## how many double-targetings will be removed?
+d.DeKegel_top5_genes_drug_sens %>%
+  unite("gene_pair_compound", c("sorted_gene_pair", "compound_id"), remove = FALSE) %>%
+  mutate(double_targeting_drug = ifelse(gene_pair_compound %in% double_targeting_drugs, TRUE, FALSE)) %>%
+  group_by(double_targeting_drug) %>%
+  summarize(n = n())
+  # mutate(rm_flag = case_when(
+  #   double_targeting_drug == TRUE & gene_pos == "A2" ~ TRUE,
+  #   TRUE ~ FALSE)) %>% # otherwise, keep
+  # group_by(rm_flag) %>%
+  # summarize(n = n())
+
+# 833476 = 721 double-targeting drug/pair combos * 578 cell lines
+
+## remove the double-targetings
+d.DeKegel_top5_genes_drug_sens <- d.DeKegel_top5_genes_drug_sens %>%
+  unite("gene_pair_compound", c("sorted_gene_pair", "compound_id"), remove = FALSE) %>%
+  mutate(double_targeting_drug = ifelse(gene_pair_compound %in% double_targeting_drugs, TRUE, FALSE)) %>%
+  mutate(rm_flag = case_when(
+    double_targeting_drug == TRUE & gene_pos == "2" ~ TRUE,
+    TRUE ~ FALSE)) %>% # if the above is not true, flag = FALSE
+  filter(rm_flag == FALSE) %>%
+  dplyr::select(-c("gene_pair_compound", "rm_flag"))
+d.DeKegel_top5_genes_drug_sens
+# 1793534-(833476/2)
+
+```
+
+### Reformat DF
+```{r}
+
+
+d.DeKegel_top5_pairs_drug_sens <- d.DeKegel_top5_genes_drug_sens %>%
+  ## add new column to flag which gene each drug targets
+  mutate(drug_targets = case_when(
+    double_targeting_drug == TRUE ~ "both",
+    double_targeting_drug == FALSE & gene_pos == "1" ~ "A1",
+    double_targeting_drug == FALSE & gene_pos == "2" ~ "A2")) %>%
+  ## separate pair-based columns to get individual gene IDs
+  separate(col = sorted_gene_pair, c("A1_hgnc", "A2_hgnc"), remove = FALSE) %>%
+  separate(col = entrez_pair, c("A1_entrez", "A2_entrez"), remove = FALSE) %>%
+  separate(col = ensembl_pair, c("A1_ensembl", "A2_ensembl"), remove = FALSE) %>%
+  ## drop old gene ID columns
+  dplyr::select(-c(gene_pos:ensembl))
+d.DeKegel_top5_pairs_drug_sens
+
+```
+
+## Add CN info
+```{r}
+
+
+## keep only relevant columns from DepMap CN dataframe
+d.cn_tmp <- d.cn_top5 %>%
+  dplyr::select(depmap_id, entrez_id, log_copy_number) 
+
+## convert entrez ID type to character
+d.cn_tmp$entrez_id <- as.character(d.cn_tmp$entrez_id)
+d.cn_tmp
+
+## add CN info to drug sensitivity DF, remove rows containing NA
+d.DeKegel_top5_pairs_drug_sens_cn <- d.DeKegel_top5_pairs_drug_sens %>%
+  ## add A1 CN info
+  left_join(d.cn_tmp, by = c("depmap_id", "A1_entrez" = "entrez_id")) %>%
+  rename(A1_log_cn = log_copy_number) %>%
+  ## add A2 CN info
+  left_join(d.cn_tmp, by = c("depmap_id", "A2_entrez" = "entrez_id")) %>%
+  rename(A2_log_cn = log_copy_number) %>%
+  ## remove rows that contain NAs
+  filter(!is.na(A1_log_cn) | !is.na(A2_log_cn)) %>%
+  filter(!is.na(dependency))
+d.DeKegel_top5_pairs_drug_sens_cn
+
+## I wanted to use pivot_wider for this but couldn't figure out how
+## here is the code just in case it is useful later:
+  # pivot_wider(names_from = gene_pos,
+  #             names_glue = "A{gene_pos}_{.value}",
+  #             values_from = c(hgnc, ensembl, log_cn))
+
+```
+
+### Reformat DF
+```{r}
+
+## calculate combined CN for each pair
+d.DeKegel_top5_pairs_drug_sens_cn <- d.DeKegel_top5_pairs_drug_sens_cn %>%
+  mutate(combined_log_cn = log2((2^A1_log_cn) + (2^A2_log_cn))) 
+d.DeKegel_top5_pairs_drug_sens_cn
+
+## reorganize columns and save DF/RDS with all annotations
+d.DeKegel_top5_pairs_drug_sens_cn_annot <- d.DeKegel_top5_pairs_drug_sens_cn %>%
+  dplyr::select(depmap_id, compound_id, sorted_gene_pair, dependency,
+                A1_log_cn:combined_log_cn, A1_hgnc:A2_ensembl, prediction_rank,
+                prediction_percentile, prediction_score:pgPEN_flag,
+                broad_id:drug_targets, cell_line:lineage_subtype)
+d.DeKegel_top5_pairs_drug_sens_cn_annot
+
+```
+
+```{r}
+
+## save CN output
+
+# write_rds(d.DeKegel_top5_pairs_drug_sens_cn_annot, 
+#           file.path(out_dir, "d.DeKegel_top5_pairs_drug_sens_cn_annot"))
+# write_tsv(d.DeKegel_top5_pairs_drug_sens_cn_annot, 
+#           file.path(out_dir, "d.DeKegel_top5_pairs_drug_sens_cn_annot.txt"))
+
+```
+
+## Add expression info
+```{r}
+
+## keep only relevant columns from DepMap expression dataframe
+d.expr_tmp <- d.expr_top5 %>%
+  dplyr::select(depmap_id, entrez_id, rna_expression)
+
+## convert entrez ID type to character
+d.expr_tmp$entrez_id <- as.character(d.expr_tmp$entrez_id)
+d.expr_tmp
+
+## add expr info to drug sensitivity DF, remove rows containing NA
+d.DeKegel_top5_pairs_drug_sens_expr <- d.DeKegel_top5_pairs_drug_sens %>%
+  ## add A1 expr info
+  left_join(d.expr_tmp, by = c("depmap_id", "A1_entrez" = "entrez_id")) %>%
+  rename(A1_log_tpm = rna_expression) %>%
+  ## add A2 expr info
+  left_join(d.expr_tmp, by = c("depmap_id", "A2_entrez" = "entrez_id")) %>%
+  rename(A2_log_tpm = rna_expression) %>%
+  ## remove rows that contain NAs
+  filter(!is.na(A1_log_tpm) | !is.na(A2_log_tpm)) %>%
+  filter(!is.na(dependency))
+d.DeKegel_top5_pairs_drug_sens_expr
+
+```
+
+### Reformat DF
+```{r}
+
+## calculate combined expr for each pair
+d.DeKegel_top5_pairs_drug_sens_expr <- d.DeKegel_top5_pairs_drug_sens_expr %>%
+  mutate(combined_log_tpm = log2((2^A1_log_tpm) + (2^A2_log_tpm))) 
+d.DeKegel_top5_pairs_drug_sens_expr
+
+## reorganize columns and save DF/RDS with all annotations
+d.DeKegel_top5_pairs_drug_sens_expr_annot <- d.DeKegel_top5_pairs_drug_sens_expr %>%
+  dplyr::select(depmap_id, compound_id, sorted_gene_pair, dependency,
+                A1_log_tpm:combined_log_tpm, A1_hgnc:A2_ensembl, prediction_rank,
+                prediction_percentile, prediction_score:pgPEN_flag,
+                broad_id:drug_targets, cell_line:lineage_subtype)
+d.DeKegel_top5_pairs_drug_sens_expr_annot
+
+```
+
+```{r}
+
+## save expr output
+
+# write_rds(d.DeKegel_top5_pairs_drug_sens_expr_annot,
+#           file.path(out_dir, "d.DeKegel_top5_pairs_drug_sens_expr_annot"))
+# write_tsv(d.DeKegel_top5_pairs_drug_sens_expr_annot,
+#           file.path(out_dir, "d.DeKegel_top5_pairs_drug_sens_expr_annot.txt"))
+
+```
+
+
+## Single gene DFs
+
+
+
+```{r}
+
+## filtering join to get drug sensitivity data only for drugs targeting top 5% genes
+## also adds drug annotations
+
+d.Broad_drug_info
+drug_sensitivity
+
+d.drug_sens_all_genes <- drug_sensitivity %>%
+  inner_join(d.Broad_drug_info, by = c("compound" = "column_name"))
+d.drug_sens_all_genes
+
+## reformat cell line metadata and add to filtered drug sensitivity DF
+d.drug_sens_all_genes <- metadata %>%
+  dplyr::select(depmap_id, stripped_cell_line_name, primary_disease,
+                subtype_disease, lineage, lineage_subtype) %>%
+  right_join(d.drug_sens_all_genes, by = "depmap_id") %>%
+  dplyr::select(-c(cell_line, screen_id, disease.area:phase)) %>%
+  rename(cell_line = stripped_cell_line_name,
+         compound_name = name,
+         compound_id = compound)
+d.drug_sens_all_genes
+
+## separate out DF so each target is on its own line
+d.drug_sens_all_genes <- d.drug_sens_all_genes %>%
+  separate_rows(target) 
+d.drug_sens_all_genes
+
+```
+
+```{r}
+
+# metadata
+# cn
+# expr
+
+d.cn_tmp <- cn %>%
+  dplyr::select(-c(gene, cell_line))
+
+d.expr_tmp <- expr %>%
+  dplyr::select(-c(gene, cell_line))
+
+```
+
+```{r}
+
+d.drug_sens_all_genes <- d.drug_sens_all_genes %>%
+  filter(!is.na(target))
+
+d.drug_sens_all_genes_cn <- inner_join(d.drug_sens_all_genes, d.cn_tmp, by = c("depmap_id", "target" = "gene_name"))
+d.drug_sens_all_genes_cn
+
+d.drug_sens_all_genes_expr <- inner_join(d.drug_sens_all_genes, d.expr_tmp, by = c("depmap_id", "target" = "gene_name"))
+d.drug_sens_all_genes_expr
+
+
+```
+
+```{r}
+
+# write_rds(d.drug_sens_all_genes_cn, file.path(out_dir, "d.drug_sens_all_genes_cn"))
+# write_rds(d.drug_sens_all_genes_expr, file.path(out_dir, "d.drug_sens_all_genes_expr"))
+
+```
+
+
+
+
+
+# Remove below?
+
+
+```{r}
+
+# d.tmp <- metadata %>%
+#   dplyr::select(depmap_id, stripped_cell_line_name, primary_disease,
+#                 subtype_disease, lineage, lineage_subtype) %>%
+#   right_join(d.cn_top5_drug, by = "depmap_id") %>% # gets rid of cell lines with no CN data
+#   dplyr::select(-cell_line) %>%
+#   rename(cell_line = stripped_cell_line_name)
+# d.tmp
+
+## expand df so each drug target is its own row
+d.drug_sens_filtered_target <- d.drug_sens_filtered %>%
+  separate_rows(target) %>%
+  dplyr::select(depmap_id, compound, dependency, name, dose, moa, target) %>%
+  rename(compound_name = name)
+d.drug_sens_filtered_target
+
+d.DeKegel_top5_genes_depmap_cn_drug <- left_join(d.DeKegel_top5_genes_depmap_cn, 
+                                                 d.drug_sens_filtered_target,
+                                                 by = c("depmap_id" = "depmap_id", "gene_name" = "target"))
+d.DeKegel_top5_genes_depmap_cn_drug
+
+```
+
+```{r}
+
+# drug_list <- d.Broad_drug_info %>%
+#   dplyr::filter(grepl(str_c(top5_druggable_genes_hgnc, collapse = "|"), target)) %>%
+#   distinct(column_name) %>%
+#   dplyr::pull(column_name)
+# 
+# drug_list
+# 
+# # str_c(top5_druggable_genes_hgnc, collapse = "|")
+# 
+# # drug_sensitivity
+# 
+# d.drug_sens_filtered <- drug_sensitivity %>%
+#   dplyr::filter(compound %in% drug_list) %>%
+#   left_join(d.Broad_drug_info, by = c("compound" = "column_name"))
+# d.drug_sens_filtered
+
+## expand df so each drug target is its own row
+# d.drug_sens_filtered_target <- d.drug_sens_filtered %>%
+#   separate_rows(target)
+# d.drug_sens_filtered_target
+
+```
 #### CN DFs
 ```{r}
 
@@ -534,47 +788,17 @@ d.drug_sens_filtered <- read_rds(file.path(out_dir, "d.drug_sens_19Q3_DeKegel_to
 
 ```
 
-```{r}
 
-drug_metadata
-d.drug_sens_filtered
 
-## expand df so each drug target is its own row
-d.drug_sens_filtered_target <- d.drug_sens_filtered %>%
-  separate_rows(target)
-d.drug_sens_filtered_target
 
-```
+
+
+
 
 
 ```{r}
 
 ### Adding CN info to top 5% of SL pairs from De Kegel paper
-### Same as above 3 chunks but for all top 5% genes (no druggability filter)
-# d.DeKegel_top5_druggable
-
-d.DeKegel_top5 <- d.DeKegel %>%
-  filter(prediction_percentile < 5)
-d.DeKegel_top5
-
-d.tmp <- metadata %>%
-  ungroup() %>%
-  dplyr::select(depmap_id, stripped_cell_line_name, primary_disease,
-                subtype_disease, lineage, lineage_subtype) %>%
-  right_join(d.cn_top5_drug, by = "depmap_id") %>% # gets rid of cell lines with no CN data
-  dplyr::select(-c(cell_line, gene)) %>%
-  rename(cell_line = stripped_cell_line_name)
-d.tmp
-
-d.DeKegel_top5_genes <- d.DeKegel_top5 %>%
-  rename(A1_hgnc = A1, A2_hgnc = A2) %>%
-  pivot_longer(cols = starts_with("A"),
-               names_to = c("gene_pos", ".value"),
-               names_pattern = "A(.)_(.*)") %>%
-  dplyr::select(prediction_rank:sorted_gene_pair,
-                gene_pos:ensembl,
-                ensembl_pair:family_size)
-d.DeKegel_top5_genes
 
 
 ## add cell line, CN information to top 5% predicted SL pair df
@@ -618,7 +842,7 @@ If I filter for the top 5th percentile of genes, I get 1,795 rows vs. 391 if we 
 ## expand df so each drug target is its own row
 d.drug_sens_filtered_target <- d.drug_sens_filtered %>%
   separate_rows(target) %>%
-  dplyr::select(depmap_id, cell_line, compound, dependency, name, dose, moa, target) %>%
+  dplyr::select(depmap_id, compound, dependency, name, dose, moa, target) %>%
   rename(compound_name = name)
 d.drug_sens_filtered_target
 
@@ -629,6 +853,51 @@ d.DeKegel_top5_genes_depmap_cn_drug
 
 
 ## CHECK THAT THIS ACTUALLY WORKED!!!!
+
+```
+
+```{r}
+
+d.tmp1 <- d.DeKegel_top5 %>%
+  rename(A1_hgnc = A1, A2_hgnc = A2) %>%
+  dplyr::select(prediction_rank:family_size)
+d.tmp1
+
+# d.DeKegel_top5_genes
+# 
+# d.tmp2 <- d.expr_top5_drug %>%
+#   dplyr::select(depmap_id, rna_expression, entrez_id)
+# 
+# d.tmp3 <- metadata %>%
+#   dplyr::select(depmap_id, stripped_cell_line_name, primary_disease, subtype_disease,
+#                 lineage, lineage_subtype) %>%
+#   rename(cell_line = stripped_cell_line_name)
+# 
+# d.DeKegel_top5_druggable_depmap_expr <- d.tmp1 %>%
+#   ## add gene 1 RNA expr info
+#   left_join(d.tmp2, by = c("A1_entrez" = "entrez_id")) %>%
+#   rename(A1_rna_expr = rna_expression) %>%
+#   ## add gene 2 RNA expr info
+#   left_join(d.tmp2, by = c("depmap_id" = "depmap_id", "A2_entrez" = "entrez_id")) %>%
+#   rename(A2_rna_expr = rna_expression) %>%
+#   ## add cell line info
+#   left_join(d.tmp3, by = "depmap_id")
+# d.DeKegel_top5_druggable_depmap_expr
+
+```
+
+```{r}
+
+d.DeKegel_top5_genes_depmap_cn_drug %>%
+  pivot_wider(names_from = gene_pos, 
+              names_glue = "A{gene_pos}_{.value}",
+              values_from = c(hgnc:ensembl, log_cn:cn_bin))
+
+# get rid of double-targeting ones
+# remake combined_cn DF => export as RDS
+# repeat for expr (WITHOUT Finan step)
+# remake plots with bins
+# redo CN analysis to do continuous variable
 
 ```
 
