@@ -115,10 +115,15 @@ ggplot(d.AKT3_expr_outlier_top_hit_withCN, aes(x = A2_log_tpm, y = AKT3_log_cn, 
 
 ```{R}
 
-eh <- ExperimentHub()
-eh.depmap <- query(eh, "depmap")
+## first time
+# eh <- ExperimentHub()
+# eh.depmap <- query(eh, "depmap")
+# 
+# mut_calls <- eh[["EH6121"]]
+# 
+# write_rds(mut_calls, file.path(out_dir, "d.mut_calls_21Q2"))
 
-mut_calls <- eh[["EH6121"]]
+mut_calls <- read_rds(file.path(out_dir, "d.mut_calls_21Q2"))
 
 ```
 
@@ -169,6 +174,11 @@ mut_calls_PI3K_pathway_tcga_hotspot <- d.mut_calls_PI3K_pathway %>%
   distinct(depmap_id, gene_name) %>%
   unite(id) %>%
   pull(id)
+
+## get just cell line and expr info
+d.tmp <- d.AKT3_expr_outlier_top_hit %>%
+  dplyr::select(depmap_id, A2_log_tpm, A2_expr_outlier_flag) %>%
+  rename(AKT3_log_tpm = A2_log_tpm, AKT3_expr_outlier_flag = A2_expr_outlier_flag)
 
 ## full join using by = character to copy all cell lines into each pathway member
 d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot <- full_join(d.PI3K_pathway, d.tmp, by = character()) %>%
@@ -293,12 +303,154 @@ fisher.test(cont)
 
 ```
 
+```{r}
+
+## run fisher.test() for all genes
+# d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot %>%
+#   group_by(gene_name) %>%
+#   filter(AKT3_expr_outlier_flag != "high") %>%
+#   mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither"))) %>%
+#   count(AKT3_expr_outlier_flag, tcga_hotspot, .drop = FALSE) %>%
+#   group_by(gene_name) %>%
+#   pivot_wider(names_from = tcga_hotspot, values_from = n) %>%
+#   dplyr::select(-c(AKT3_expr_outlier_flag)) %>%
+#   fisher.test(x = "TRUE", y = "FALSE") %>%
+#   broom::glance()
+
+d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot_fisher_pval <- d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot %>%
+  # group_by(gene_name) %>%
+  filter(AKT3_expr_outlier_flag != "high") %>%
+  mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither"))) %>%
+  group_by(gene_name) %>%
+  summarize(p_val = fisher.test(AKT3_expr_outlier_flag, tcga_hotspot)$p.value)
+
+d.AKT3_expr_outlier_top_hit_AKT_del_mut_fisher_pval <- d.AKT3_expr_outlier_top_hit_AKT_del_mut %>%
+  # group_by(gene_name) %>%
+  filter(AKT3_expr_outlier_flag != "high") %>%
+  mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither"))) %>%
+  group_by(gene_name) %>%
+  summarize(p_val = fisher.test(AKT3_expr_outlier_flag, deleterious_mut)$p.value)
+
+d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot %>%
+  # group_by(gene_name) %>%
+  filter(AKT3_expr_outlier_flag != "high") %>%
+  mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither"))) %>%
+  group_by(gene_name) %>%
+  # group_modify(~ broom::glance(fisher.test(x = AKT3_expr_outlier_flag, y = tcga_hotspot)))
+  do(broom::tidy(fisher.test(.$AKT3_expr_outlier_flag, .$tcga_hotspot)))
+
+d.AKT3_expr_outlier_top_hit_AKT_del_mut %>%
+  # group_by(gene_name) %>%
+  filter(AKT3_expr_outlier_flag != "high") %>%
+  mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither"))) %>%
+  group_by(gene_name) %>%
+  # group_modify(~ broom::glance(fisher.test(x = AKT3_expr_outlier_flag, y = tcga_hotspot)))
+  do(broom::tidy(fisher.test(.$AKT3_expr_outlier_flag, .$deleterious_mut)))
+
+```
+See: this blog post on tidy chi-squared tests: http://ritsokiguess.site/docs/2018/04/12/tidy-chi-squared-testing/
+https://stackoverflow.com/questions/42991993/get-chisq-testp-value-for-several-groups-using-dplyrgroup-by
+
+```{r}
+d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot <- d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot %>%
+  left_join(d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot_fisher_pval, by = "gene_name") %>%
+  mutate(tcga_hotspot = factor(tcga_hotspot, levels = c(TRUE, FALSE)))
+# d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot_fisher_pval
+
+d.AKT3_expr_outlier_top_hit_AKT_del_mut <- d.AKT3_expr_outlier_top_hit_AKT_del_mut %>%
+  left_join(d.AKT3_expr_outlier_top_hit_AKT_del_mut_fisher_pval, by = "gene_name")
+# d.AKT3_expr_outlier_top_hit_AKT_del_mut_fisher_pval
+
+```
+
+
+```{r}
+
+d.label <- d.AKT3_expr_outlier_top_hit_AKT_del_mut %>%
+  filter(AKT3_expr_outlier_flag == "low" | AKT3_expr_outlier_flag == "neither") %>%
+  mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither"))) %>%
+  group_by(gene_name) %>%
+  mutate(y.position = (max(AKT3_log_tpm) + 0.1*(max(AKT3_log_tpm) - min(AKT3_log_tpm)))) %>%
+  dplyr::select(gene_name, p_val, y.position) %>%
+  distinct(gene_name, .keep_all = TRUE) %>%
+  mutate(group1 = TRUE,
+         group2 = FALSE) %>%
+  mutate(p_val_label = case_when(
+    p_val < 0.05 ~ scientific(p_val, 3),
+    p_val >= 0.05 ~ "ns")) %>%
+  ungroup()
+d.label
+
+
+ggplot(d.AKT3_expr_outlier_top_hit_AKT_del_mut, aes(x = deleterious_mut, y = AKT3_log_tpm, color = AKT3_expr_outlier_flag)) +
+  geom_jitter() +
+  stat_pvalue_manual(d.label, label = "{p_val_label}", hide.ns = TRUE,## "P = {p_val}"
+                     tip.length = 0.03, size = 3, vjust = -0.5) +
+  scale_color_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F", "high" = "#B84250")) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.25))) +
+  theme_bw() +
+  theme(axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~gene_name, ncol = 4, scales = "free")
+# ggsave(file.path(out_dir, "AKT3_expr_vs_PI3K_pathway_del_muts.png"), width = 10, height = 16)
+
+
+```
+
+
+```{r}
+
+d.label <- d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot %>%
+  filter(AKT3_expr_outlier_flag == "low" | AKT3_expr_outlier_flag == "neither") %>%
+  mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither"))) %>%
+  group_by(gene_name) %>%
+  mutate(y.position = (max(AKT3_log_tpm) + 0.1*(max(AKT3_log_tpm) - min(AKT3_log_tpm)))) %>%
+  dplyr::select(gene_name, p_val, y.position) %>%
+  distinct(gene_name, .keep_all = TRUE) %>%
+  mutate(group1 = TRUE,
+         group2 = FALSE) %>%
+  mutate(p_val_label = case_when(
+    p_val < 0.05 ~ scientific(p_val, 3),
+    p_val >= 0.05 ~ "ns")) %>%
+  ungroup()
+d.label
+
+
+ggplot(d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot, aes(x = tcga_hotspot, y = AKT3_log_tpm, color = AKT3_expr_outlier_flag)) +
+  geom_jitter() +
+  stat_pvalue_manual(d.label, label = "{p_val_label}", hide.ns = TRUE,## "P = {p_val}"
+                     tip.length = 0.03, size = 3, vjust = -0.5) +
+  scale_color_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F", "high" = "#B84250")) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.25))) +
+  theme_bw() +
+  theme(axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~gene_name, ncol = 4, scales = "free")
+ggsave(file.path(out_dir, "AKT3_expr_vs_PI3K_pathway_tcga_hotspot_muts.png"), width = 10, height = 16)
+
+```
+
+
+
+
 
 
 Think about mutation calls more - must be some way to look at mutations/types for each gene individually... 
 
 
 ## Phase 2 data
+
+```{r}
+
+## first time
+# eh <- ExperimentHub()
+# eh.depmap <- query(eh, "depmap")
+# expr <- eh[["EH6120"]]
+# write_rds(expr, file.path(out_dir, "d.expr_21Q2"))
+
+expr <- read_rds(file.path(out_dir, "d.expr_21Q2"))
+
+```
 
 ```{r}
 
@@ -329,6 +481,22 @@ inner_join(d.tmp1, d.tmp2)
 ## cell lines that don't overlap between Phase 1 expression df and Phase 2 drug df
 anti_join(d.tmp1, d.tmp2)
 
+```
+
+```{r}
+
+## get AKT3 expr data for Phase 2 cell lines
+d.AKT3_expr <- expr %>%
+  filter(gene_name == "AKT3") %>%
+  dplyr::select(depmap_id, rna_expression) %>%
+  rename(AKT3_log_tpm = rna_expression)
+d.AKT3_expr
+
+
+
+```
+
+```{r}
 
 ## filter dose response datasets for just drugs of interest (all AKT inhibitors?)
 
@@ -336,7 +504,8 @@ anti_join(d.tmp1, d.tmp2)
 
 d.phase2_auc_AKTi_only <- d.phase2_auc %>%
   filter(moa == "AKT inhibitor") %>%
-  dplyr::select(broad_id, depmap_id, name, screen_id, auc) 
+  dplyr::select(broad_id, depmap_id, name, screen_id, auc) %>%
+  rename(compound_id = broad_id)
 d.phase2_auc_AKTi_only
 
 # d.phase2_dose_response
@@ -344,14 +513,23 @@ d.phase2_dose_response_AKTi_only <- d.phase2_dose_response %>%
   dplyr::select(depmap_id, matches(paste(AKT_inhibitor_ids, collapse = "|")))
 d.phase2_dose_response_AKTi_only
 
-d.AKT3_expr_only <- d.AKT3_expr_outlier_top_hit %>%
-  dplyr::select(depmap_id, A2_log_tpm, A2_expr_outlier_flag) %>%
-  rename(AKT3_log_tpm = A2_log_tpm, AKT3_expr_outlier_flag = A2_expr_outlier_flag)
-d.AKT3_expr_only
+# d.AKT3_expr_only <- d.AKT3_expr_outlier_top_hit %>%
+#   dplyr::select(depmap_id, A2_log_tpm, A2_expr_outlier_flag) %>%
+#   rename(AKT3_log_tpm = A2_log_tpm, AKT3_expr_outlier_flag = A2_expr_outlier_flag)
+# d.AKT3_expr_only
 
 d.phase2_auc_AKTi_only_AKT3_expr <- left_join(d.phase2_auc_AKTi_only, 
-                                              d.AKT3_expr_only, 
-                                              by = "depmap_id")
+                                              d.AKT3_expr, 
+                                              by = "depmap_id") %>%
+  filter(!is.na(AKT3_log_tpm) | !is.na(auc)) %>%
+  group_by(compound_id) %>%
+  mutate(scaled_AKT3_log_tpm = RobScale(AKT3_log_tpm, center = TRUE, scale = TRUE)) %>%
+  mutate(AKT3_expr_outlier_flag = case_when(
+    scaled_AKT3_log_tpm < -1.5 ~ "low",
+    scaled_AKT3_log_tpm > 1.5 ~ "high",
+    TRUE ~ "neither")) %>%
+  ungroup() %>%
+  mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither", "high"))) 
 d.phase2_auc_AKTi_only_AKT3_expr
 
 ## add AKT3 expr data to each cell line 
@@ -378,6 +556,26 @@ d.p_vals <- d.phase2_auc_AKTi_only_AKT3_expr %>%
   summarize("p_val" = wilcox.test(auc ~ AKT3_expr_outlier_flag)$p.value)
 d.p_vals
 
+d.phase2_auc_AKTi_only_AKT3_expr %>%
+  filter(AKT3_expr_outlier_flag == "low" | AKT3_expr_outlier_flag == "neither") %>%
+  group_by(name) %>%
+  group_modify(~ broom::glance(wilcox.test(auc ~ AKT3_expr_outlier_flag, data = .x)))
+
+# d.phase2_auc_AKTi_only_AKT3_expr %>%
+#   filter(AKT3_expr_outlier_flag == "low" | AKT3_expr_outlier_flag == "neither") %>%
+#   group_by(name) %>%
+#   map_dfr(~ (wilcox.test(auc ~ AKT3_expr_outlier_flag, data = .x)))
+
+## put mini version on Github
+
+## try map_dfr: resultTable <- purrr::map_dfr(repaired, rbind, .id = "molecular_id")
+# ~ broom::glance(lm(dependency ~ combined_log_tpm, data = .x))
+
+```
+
+
+```{r}
+
 
 d.label <- d.phase2_auc_AKTi_only_AKT3_expr %>%
   filter(AKT3_expr_outlier_flag == "low" | AKT3_expr_outlier_flag == "neither") %>%
@@ -388,8 +586,10 @@ d.label <- d.phase2_auc_AKTi_only_AKT3_expr %>%
   dplyr::select(name, p_val, y.position) %>%
   distinct(name, .keep_all = TRUE) %>%
   mutate(group1 = "low",
-         group2 = "neither",
-         p_val = scientific(p_val, 3)) %>%
+         group2 = "neither") %>%
+  mutate(p_val_label = case_when(
+    p_val < 0.05 ~ scientific(p_val, 3),
+    p_val >= 0.05 ~ "ns")) %>%
   ungroup()
 d.label
 
@@ -405,19 +605,138 @@ d.phase2_auc_AKTi_only_AKT3_expr %>%
   filter(AKT3_expr_outlier_flag == "low" | AKT3_expr_outlier_flag == "neither") %>%
   mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither"))) %>%
   ggplot(aes(x = AKT3_expr_outlier_flag, y = auc)) +
-  geom_jitter(aes(color = AKT3_expr_outlier_flag), width = 0.3, size = 1) +
-  geom_boxplot(alpha = 0) +
-  stat_pvalue_manual(d.label, label = "P = {p_val}", hide.ns = TRUE,## doesn't work yet
+  geom_jitter(aes(color = AKT3_expr_outlier_flag), width = 0.3, size = 1, alpha = 0.7) +
+  geom_boxplot(aes(fill = AKT3_expr_outlier_flag), outlier.shape = NA, coef = 0) +
+  stat_pvalue_manual(d.label, label = "{p_val_label}", hide.ns = TRUE,## "P = {p_val}"
                      tip.length = 0.03, size = 3, vjust = -0.5) +
   scale_color_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F")) +
+  scale_fill_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F")) +
   # labs(x = x_title, y = y_title) +
   scale_y_continuous(expand = expansion(mult = c(0.1, 0.25))) +
   theme_bw() +
-  theme(#aspect.ratio = aspect_ratio,
+  theme(aspect.ratio = 0.8,
+        axis.text = element_text(color = "black"),
+        # axis.text.x = element_text(angle = 45, hjust=1),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+# ggsave(file.path(out_dir, "AKT3_expr_vs_AKT3i_sensitivity_depmap_phase2_data.png"), height = 6, width = 6)
+
+```
+
+```{r}
+
+d.phase2_dose_response_AKTi_only_long <- d.phase2_dose_response_AKTi_only %>%
+  pivot_longer(!depmap_id, 
+               names_to = "compound_dose",
+               values_to = "rep_collapsed_lfc") %>%
+  separate(col = compound_dose, 
+           into = c("compound_id", "dose", "screen"),
+           sep = "::", 
+           extra = "merge", ## if >3 columns, merge "extras" into last col
+           remove = TRUE) %>% ## remove original column that's now been separated
+  filter(screen == "HTS002") %>%
+  dplyr::select(-screen) %>%
+  mutate(dose = as.numeric(dose)) %>%
+  filter(!is.na(rep_collapsed_lfc)) 
+d.phase2_dose_response_AKTi_only_long
+
+## add AKT3 expr info to dose response DF
+d.phase2_dose_response_AKTi_only_expr <- d.phase2_auc_AKTi_only_AKT3_expr %>%
+  dplyr::select(depmap_id, AKT3_log_tpm, AKT3_expr_outlier_flag) %>%
+  distinct(depmap_id, .keep_all = TRUE) %>%
+  left_join(d.phase2_dose_response_AKTi_only_long, by = "depmap_id")
+d.phase2_dose_response_AKTi_only_expr
+
+## add drug names to dose response DF
+d.phase2_dose_response_AKTi_only_expr <- d.Broad_drug_info %>%
+  rename(compound_id = broad_id, compound_name = name) %>%
+  dplyr::select(compound_id, compound_name) %>%
+  right_join(d.phase2_dose_response_AKTi_only_expr, by = "compound_id")
+
+## calculate median LFC 
+d.phase2_dose_response_AKTi_only_expr_summ <- d.phase2_dose_response_AKTi_only_expr %>%
+  group_by(compound_name, AKT3_expr_outlier_flag, dose) %>%
+  summarize(median_lfc = median(rep_collapsed_lfc),
+            mean_lfc = mean(rep_collapsed_lfc),
+            sd_lfc = sd(rep_collapsed_lfc)) %>%
+  filter(!is.na(compound_name))
+d.phase2_dose_response_AKTi_only_expr_summ
+
+```
+
+```{r}
+
+## check how many expr outlier high cell lines there are
+d.phase2_dose_response_AKTi_only_expr %>%
+  filter(AKT3_expr_outlier_flag == "high") %>%
+  distinct(depmap_id) %>%
+  nrow()
+
+## only 1 => remove from analysis
+d.phase2_dose_response_AKTi_only_expr_summ_plot <- d.phase2_dose_response_AKTi_only_expr_summ %>%
+  filter(AKT3_expr_outlier_flag != "high") %>%
+  mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither")))
+
+## plot dose response curves
+ggplot(d.phase2_dose_response_AKTi_only_expr_summ_plot, 
+       aes(x = log2(dose), y = median_lfc, color = AKT3_expr_outlier_flag)) +
+  geom_point() +
+  geom_line() +
+  scale_color_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F")) +
+  theme_bw() +
+  theme(aspect.ratio = 0.8,
         axis.text = element_text(color = "black"),
         # axis.text.x = element_text(angle = 45, hjust=1),
         axis.ticks = element_line(color = "black")) +
-  facet_wrap(~name, scales = "free_y")
+  facet_wrap(~compound_name, scales = "free_y")
+
+ggplot(d.phase2_dose_response_AKTi_only_expr_summ_plot, 
+       aes(x = log2(dose), y = mean_lfc, color = AKT3_expr_outlier_flag)) +
+  geom_point() +
+  geom_line() +
+  geom_errorbar(aes(ymin = mean_lfc - sd_lfc, ymax = mean_lfc + sd_lfc), 
+                width = 1, position = position_dodge(0.05)) +
+  scale_color_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F")) +
+  theme_bw() +
+  theme(aspect.ratio = 0.8,
+        axis.text = element_text(color = "black"),
+        # axis.text.x = element_text(angle = 45, hjust=1),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~compound_name, scales = "free_y")
+# ggsave(file.path(out_dir, "AKT3_expr_vs_AKT3i_sensitivity_depmap_phase2_data_dose_response.png"), height = 6, width = 8)
+
+```
+
+```{r}
+
+## LUNG ONLY
+
+## add AKT3 expr info to dose response DF
+d.AKT3_expr
+
+expr
+# d.phase2_dose_response_AKTi_only_expr_lung <- 
+  d.phase2_auc_AKTi_only_AKT3_expr #%>%
+  # dplyr::select(depmap_id, AKT3_log_tpm, AKT3_expr_outlier_flag) %>%
+  # distinct(depmap_id, .keep_all = TRUE) %>%
+  # left_join(d.phase2_dose_response_AKTi_only_long, by = "depmap_id")
+# d.phase2_dose_response_AKTi_only_expr_lung
+
+# ## add drug names to dose response DF
+# d.phase2_dose_response_AKTi_only_expr <- d.Broad_drug_info %>%
+#   rename(compound_id = broad_id, compound_name = name) %>%
+#   dplyr::select(compound_id, compound_name) %>%
+#   right_join(d.phase2_dose_response_AKTi_only_expr, by = "compound_id")
+# 
+# ## calculate median LFC 
+# d.phase2_dose_response_AKTi_only_expr_summ <- d.phase2_dose_response_AKTi_only_expr %>%
+#   group_by(compound_name, AKT3_expr_outlier_flag, dose) %>%
+#   summarize(median_lfc = median(rep_collapsed_lfc),
+#             mean_lfc = mean(rep_collapsed_lfc),
+#             sd_lfc = sd(rep_collapsed_lfc)) %>%
+#   filter(!is.na(compound_name))
+# d.phase2_dose_response_AKTi_only_expr_summ
 
 ```
 

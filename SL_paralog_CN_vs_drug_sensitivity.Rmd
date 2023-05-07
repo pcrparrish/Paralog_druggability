@@ -73,6 +73,71 @@ d.DeKegel_top5_pairs_drug_sens_cn <- d.DeKegel_top5_pairs_drug_sens_cn_annot %>%
 ```
 
 
+### Useful functions
+```{r}
+
+## adjust p-values
+BH_adjust <- function(df){
+  
+  d.p_vals <- df %>%
+  arrange(p_val) %>%
+  dplyr::select(target, compound_id, p_val) 
+
+  p_vals <- d.p_vals %>%
+    arrange(p_val) %>%
+    dplyr::select(p_val) %>%
+    pull()
+  
+  fdr_vals <- p.adjust(p_vals, method = "BH")
+
+  d.fdr_vals <- tibble(fdr = fdr_vals)
+  
+  d.stats <- d.p_vals %>%
+    add_column(d.fdr_vals)
+  d.stats
+  
+  return(d.stats)
+  
+}
+
+
+```
+
+
+```{r}
+
+## summarize stats output
+summarize_stats <- function(df){
+  df_new <- df %>%
+    distinct(target, compound_id, .keep_all = TRUE)
+  
+  n_p_L0.05 <- df_new %>%
+    filter(p_val < 0.05) %>%
+    nrow()
+  
+  n_p_L0.01 <- df_new %>%
+    filter(p_val < 0.01) %>%
+    nrow()
+  
+  n_fdr_L0.05 <- df_new %>%
+    filter(fdr < 0.05) %>%
+    nrow()
+  
+  n_fdr_L0.1 <- df_new %>%
+    filter(fdr < 0.1) %>%
+    nrow()
+  
+  cat(paste("df:", deparse(substitute(df)), "\n", sep = " "))
+  cat("# target/compound pairs with\n")
+  cat(paste("p < 0.05:", n_p_L0.05, "\n", sep = " "))
+  cat(paste("p < 0.01:", n_p_L0.01, "\n", sep = " "))
+  cat(paste("FDR < 0.05:", n_fdr_L0.05, "\n", sep = " "))
+  cat(paste("FDR < 0.1:", n_fdr_L0.1, "\n\n", sep = " "))
+  
+}
+
+```
+
 # Analysis
 
 ## Combined CN
@@ -1094,6 +1159,274 @@ ggplot(d.plot, aes(x = target, y = (2^log_copy_number))) +
           axis.text = element_text(color = "black"),
           axis.ticks = element_line(color = "black")) +
     facet_wrap(~target, scale = "free")
+
+```
+
+#### + and - outliers
+```{r}
+
+d.drug_sens_all_genes_cn_outlier <- d.drug_sens_all_genes_cn_outlier %>%
+  mutate(cn_outlier_flag = factor(cn_outlier_flag, levels = c("low", "neither", "high"))) 
+
+```
+
+
+```{r}
+
+
+d.drug_sens_all_genes_cn_outlier %>%
+  group_by(target, compound_id, cn_outlier_flag) %>%
+  summarize(n = n()) %>%
+  group_by(cn_outlier_flag) %>%
+  summarize(mean = mean(n),
+            median = median(n))
+
+## how many compounds/targets have 0 high or low outlier cell lines?
+d.drug_sens_all_genes_cn_outlier %>%
+  group_by(target, compound_id, cn_outlier_flag) %>%
+  summarize(n = n()) 
+
+d.drug_sens_all_genes_cn_outlier %>%
+  group_by(target, compound_id, cn_outlier_flag) %>%
+  summarize(n = n()) %>%
+  ungroup() %>%
+  group_by(target, compound_id) %>%
+  summarize(n = n())
+  
+
+```
+
+```{r}
+
+## low vs. neither (with high included but ignoring it) => 
+## calculate diff in median LFC between relevant groups
+
+d.drug_sens_all_genes_cn_outlier_low <- d.drug_sens_all_genes_cn_outlier %>%
+  group_by(target, compound_id) %>%
+  ## get rid of drug/targets that don't have any "low" cell lines
+  filter(any(cn_outlier_flag == "low")) %>%
+  ungroup() 
+
+d.drug_sens_all_genes_cn_outlier_low_grp_med_diff <- d.drug_sens_all_genes_cn_outlier_low %>%
+  group_by(target, compound_id, cn_outlier_flag) %>%
+  ## calculate median dependency score for each outlier group
+  summarize(grp_med_dependency = median(dependency)) %>%
+  pivot_wider(names_from = cn_outlier_flag, values_from = grp_med_dependency) %>%
+  ## calculate difference between low and neither groups
+  mutate(grp_med_diff = low - neither) %>%
+  dplyr::select(target, compound_id, grp_med_diff) 
+
+d.drug_sens_all_genes_cn_outlier_low <- d.drug_sens_all_genes_cn_outlier_low %>%
+  left_join(d.drug_sens_all_genes_cn_outlier_low_grp_med_diff, by = c("target", "compound_id"))
+
+## high vs. neither (with low included but ignoring it) => 
+## calculate diff in median LFC between relevant groups =>
+d.drug_sens_all_genes_cn_outlier_high <- d.drug_sens_all_genes_cn_outlier %>%
+  group_by(target, compound_id) %>%
+  ## get rid of drug/targets that don't have any "high" cell lines
+  filter(any(cn_outlier_flag == "high")) %>%
+  ungroup() 
+
+d.drug_sens_all_genes_cn_outlier_high_grp_med_diff <- d.drug_sens_all_genes_cn_outlier_high %>%
+  group_by(target, compound_id, cn_outlier_flag) %>%
+  ## calculate median dependency score for each outlier group
+  summarize(grp_med_dependency = median(dependency)) %>%
+  pivot_wider(names_from = cn_outlier_flag, values_from = grp_med_dependency) %>%
+  ## calculate difference between low and neither groups
+  mutate(grp_med_diff = high - neither) %>%
+  dplyr::select(target, compound_id, grp_med_diff) 
+
+d.drug_sens_all_genes_cn_outlier_high <- d.drug_sens_all_genes_cn_outlier_high %>%
+  left_join(d.drug_sens_all_genes_cn_outlier_high_grp_med_diff, by = c("target", "compound_id"))
+
+```
+
+```{r}
+
+## low outliers and drug sensitivity
+## calculate p-value (adjusted for multiple within-group tests?)
+d.drug_sens_all_genes_cn_outlier_low_wrst_sens_pvals <- d.drug_sens_all_genes_cn_outlier_low %>%
+  ## remove cell lines that are high outliers (I think this makes sense... but I'm not sure)
+  filter(cn_outlier_flag != "high" & grp_med_diff < 0) %>%
+  group_by(target, compound_id) %>%
+  summarize(p_val = wilcox.test(dependency ~ cn_outlier_flag, alternative = "less")$p.value)
+# d.drug_sens_all_genes_cn_outlier_low_wrst_sens_pvals
+
+## adjust for multiple testing overall
+d.stats <- BH_adjust(d.drug_sens_all_genes_cn_outlier_low_wrst_sens_pvals)
+# d.stats
+
+d.drug_sens_all_genes_cn_outlier_low_wrst_sens <- d.drug_sens_all_genes_cn_outlier_low %>%
+  left_join(d.stats, by = c("target", "compound_id"))
+# d.drug_sens_all_genes_cn_outlier_low_wrst_sens
+
+## low outliers and drug resistance
+## calculate p-value
+d.drug_sens_all_genes_cn_outlier_low_wrst_resist_pvals <- d.drug_sens_all_genes_cn_outlier_low %>%
+  ## remove cell lines that are high outliers (I think this makes sense... but I'm not sure)
+  filter(cn_outlier_flag != "high" & grp_med_diff > 0) %>%
+  group_by(target, compound_id) %>%
+  summarize(p_val = wilcox.test(dependency ~ cn_outlier_flag, alternative = "greater")$p.value)
+# d.drug_sens_all_genes_cn_outlier_low_wrst_resist_pvals
+
+## adjust for multiple testing overall
+d.stats <- BH_adjust(d.drug_sens_all_genes_cn_outlier_low_wrst_resist_pvals)
+# d.stats
+
+d.drug_sens_all_genes_cn_outlier_low_wrst_resist <- d.drug_sens_all_genes_cn_outlier_low %>%
+  left_join(d.stats, by = c("target", "compound_id"))
+
+# d.drug_sens_all_genes_cn_outlier_low_wrst_resist
+
+## high outliers and drug sensitivity
+d.drug_sens_all_genes_cn_outlier_high_wrst_sens_pvals <- d.drug_sens_all_genes_cn_outlier_high %>%
+  ## remove cell lines that are high outliers (I think this makes sense... but I'm not sure)
+  filter(cn_outlier_flag != "low" & grp_med_diff < 0) %>%
+  group_by(target, compound_id) %>%
+  summarize(p_val = wilcox.test(dependency ~ cn_outlier_flag, alternative = "greater")$p.value)
+# d.drug_sens_all_genes_cn_outlier_high_wrst_sens_pvals
+
+## adjust for multiple testing overall
+d.stats <- BH_adjust(d.drug_sens_all_genes_cn_outlier_high_wrst_sens_pvals)
+# d.stats
+
+d.drug_sens_all_genes_cn_outlier_high_wrst_sens <- d.drug_sens_all_genes_cn_outlier_high %>%
+  left_join(d.stats, by = c("target", "compound_id"))
+# d.drug_sens_all_genes_cn_outlier_high_wrst_sens
+
+## high outliers and drug resistance
+d.drug_sens_all_genes_cn_outlier_high_wrst_resist_pvals <- d.drug_sens_all_genes_cn_outlier_high %>%
+  ## remove cell lines that are high outliers (I think this makes sense... but I'm not sure)
+  filter(cn_outlier_flag != "low" & grp_med_diff > 0) %>%
+  group_by(target, compound_id) %>%
+  summarize(p_val = wilcox.test(dependency ~ cn_outlier_flag, alternative = "less")$p.value)
+# d.drug_sens_all_genes_cn_outlier_high_wrst_resist_pvals
+
+## adjust for multiple testing overall
+d.stats <- BH_adjust(d.drug_sens_all_genes_cn_outlier_high_wrst_resist_pvals)
+# d.stats
+
+d.drug_sens_all_genes_cn_outlier_high_wrst_resist <- d.drug_sens_all_genes_cn_outlier_high %>%
+  left_join(d.stats, by = c("target", "compound_id"))
+# d.drug_sens_all_genes_cn_outlier_high_wrst_resist
+
+
+```
+
+```{r}
+
+## low outliers
+summarize_stats(d.drug_sens_all_genes_cn_outlier_low_wrst_sens)
+summarize_stats(d.drug_sens_all_genes_cn_outlier_low_wrst_resist)
+
+## high outliers
+summarize_stats(d.drug_sens_all_genes_cn_outlier_high_wrst_sens)
+summarize_stats(d.drug_sens_all_genes_cn_outlier_high_wrst_resist)
+
+```
+
+For deparsing variables to use in dplyr: https://cran.r-project.org/web/packages/dplyr/vignettes/programming.html
+```{r}
+
+make_outlier_plot <- function(df, direction, col_name, stat_cutoff){
+  
+  ## save col_name as a string for later use
+  stat_name <- deparse(substitute(col_name))
+
+  d.plot <- df %>% 
+    ungroup() %>%
+    ##use {{}} to deparse variable name for use in dplyr functions
+    filter({{col_name}} < stat_cutoff) %>%
+    unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
+    mutate("target_compound_label" = reorder(target_compound_label, {{col_name}}),
+           "target" = reorder(target, {{col_name}})) #%>%
+
+  ## make df to label adjusted FDR/p-val for each plot
+  d.label <- d.plot %>%
+    group_by(target, compound_id) %>%
+    mutate(y.position = (max(dependency) + 0.1*(max(dependency) - min(dependency)))) %>%
+    dplyr::ungroup() %>%
+    dplyr::select(target_compound_label, p_val, fdr, y.position) %>%
+    distinct(target_compound_label, .keep_all = TRUE) %>%
+    mutate(group1 = direction,
+           group2 = "neither",
+           p_val = scientific(p_val, 3),
+           fdr = scientific(fdr, 3)) 
+  d.label
+  
+  length <- d.plot %>%
+    ungroup() %>%
+    distinct(target_compound_label) %>%
+    nrow()
+    
+  aspect_ratio <- 1
+  n_rows <- 1
+  n_cols <- 1
+  n_pages <- ceiling(length/(n_rows*n_cols))
+  
+  ## make stat label for labeling significance brackets
+  stat_label <- paste0(toupper(stat_name), " = ", "{", stat_name, "}")
+
+  ## remove the first 2 characters of dataframe name
+  df_name <- str_sub(deparse(substitute(df)), start = 3)
+
+  ## save output file name
+  file_name <- paste(date, df_name, stat_name, "L", stat_cutoff, ".pdf", sep = "_")
+
+  pdf(file.path(out_dir, file_name), width = 6, height = 3)
+  for(i in 1:n_pages){
+    p <-  ggplot(d.plot, aes(x = cn_outlier_flag, y = dependency)) +
+      geom_hline(yintercept = 0) +
+      geom_jitter(aes(color = cn_outlier_flag), width = 0.3) +
+      geom_boxplot(alpha = 0) +
+      stat_pvalue_manual(d.label, label = stat_label, tip.length = 0.03, size = 3, vjust = -0.5) +
+      ## adds extra space on top & bottom so p-value label will fit
+      scale_y_continuous(expand = expansion(mult = 0.15)) +
+      scale_color_manual(values = c("low" = "blue", "neither" = "gray50", "high" = "red")) +
+      labs(x = "CN_group",
+           y = "LFC_treated_vs_DMSO") +
+      theme_bw() +
+      theme(aspect.ratio = aspect_ratio,
+            axis.text = element_text(color = "black"),
+            axis.ticks = element_line(color = "black"),
+            legend.position = "none") +
+      facet_wrap_paginate(~target_compound_label, scales = "free_y",
+                          nrow = n_rows, ncol = n_cols, page = i)
+
+    q <- ggplot(d.plot, aes(x = target, y = (2^log_copy_number))) +
+      geom_jitter(aes(color = cn_outlier_flag), width = 0.3) +
+      geom_boxplot(alpha = 0) +
+      scale_color_manual(values = c("low" = "blue", "neither" = "gray50", "high" = "red")) +
+      labs(x = "Target", y = "Copy_number") +
+      coord_trans(y = "log2") +
+      theme_bw() +
+      theme(aspect.ratio = aspect_ratio,
+            axis.text = element_text(color = "black"),
+            axis.ticks = element_line(color = "black")) +
+      facet_wrap_paginate(~target_compound_label, scale = "free",
+                          nrow = n_rows, ncol = n_cols, page = i)
+    print(ggarrange(p, q, ncol = 2, align = "hv", common.legend = TRUE, legend = "right"))
+  }
+  dev.off()
+  
+}
+
+
+```
+
+
+
+```{r}
+
+# d.drug_sens_all_genes_cn_outlier_low_wrst_sens
+
+# make_outlier_plot(d.drug_sens_all_genes_cn_outlier_low_wrst_sens, "low", fdr, 0.1)
+
+# d.drug_sens_all_genes_expr_outlier_low_wrst_resist = 0 FDR < 0.1 - skip
+
+# make_outlier_plot(d.drug_sens_all_genes_cn_outlier_high_wrst_sens, "high", fdr, 0.1)
+
+# make_outlier_plot(d.drug_sens_all_genes_cn_outlier_high_wrst_resist, "high", fdr, 0.1)
 
 ```
 
