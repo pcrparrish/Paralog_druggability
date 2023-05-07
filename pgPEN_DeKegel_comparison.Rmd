@@ -93,7 +93,148 @@ d.Parrish_DeKegel
 
 ```
 
-### Parrish vs. De Kegel
+### Finan druggability
+```{r}
+
+d.Parrish_DeKegel <- d.Parrish_DeKegel %>%
+  mutate(top_5_percent_flag = ifelse(prediction_percentile < 5, TRUE, FALSE)) %>%
+  mutate(comp_validated_flag = ifelse(broad_SL_flag != "SL_in_neither" & 
+                                        top_5_percent_flag == TRUE, TRUE, FALSE)) 
+
+d.Parrish_DeKegel_high_conf <- d.Parrish_DeKegel %>%
+  filter(broader_SL_flag == "SL_in_both" & comp_validated_flag == TRUE) %>%
+  rowwise() %>%
+  mutate(mean_GI_score = mean(c(PC9_gene_gene_GI_score, HeLa_gene_gene_GI_score)))
+d.Parrish_DeKegel_high_conf
+
+d.Parrish_DeKegel_medium_conf <- d.Parrish_DeKegel %>%
+  filter(comp_validated_flag == TRUE)
+
+```
+
+
+Intersect high-confidence hits (screens + depmap predictions?) with druggability...
+```{r}
+
+d.druggable
+d.DeKegel
+
+d.tmp <- d.druggable %>%
+  dplyr::select(ensembl_gene_id, druggability_tier)
+
+d.DeKegel_drug <- left_join(d.DeKegel, d.tmp, by = c("A1_ensembl" = "ensembl_gene_id")) %>%
+  rename(A1_drug_tier = druggability_tier) %>%
+  left_join(d.tmp, by = c("A2_ensembl" = "ensembl_gene_id")) %>%
+  rename(A2_drug_tier = druggability_tier)
+d.DeKegel_drug
+
+d.DeKegel_drug <- d.DeKegel_drug %>%
+  mutate(druggable_flag = case_when(
+    is.na(A2_drug_tier) ~ FALSE,
+    is.na(A2_drug_tier) ~ FALSE,
+    TRUE ~ TRUE), 
+    top_5_percent = ifelse(prediction_percentile < 5, TRUE, FALSE)) %>%
+  mutate(top_5_SL_ge_1_screen = case_when(
+      top_5_percent == TRUE & n_screens_SL > 0 ~ TRUE,
+      TRUE ~ FALSE)) %>%
+  mutate(SL_screen_ratio = n_screens_SL / n_screens) %>%
+  mutate(top_5_SL_all_screens = case_when(
+    top_5_percent == TRUE & SL_screen_ratio == 1 ~ TRUE,
+    TRUE ~ FALSE))
+
+```
+
+
+```{r}
+
+## druggable & top 5th percentile
+d.DeKegel_drug %>%
+  group_by(top_5_percent, druggable_flag) %>%
+  summarize(n = n())
+
+d.DeKegel_drug %>%
+  filter(top_5_percent == TRUE) %>%
+  filter(druggable_flag == TRUE)
+
+## druggable, top 5th percentile, and SL in ≥1 screen
+d.DeKegel_drug %>%
+  group_by(top_5_SL_ge_1_screen, druggable_flag) %>%
+  summarize(n = n())
+
+d.DeKegel_drug %>%
+  filter(top_5_SL_ge_1_screen == TRUE) %>%
+  filter(druggable_flag == TRUE)
+
+## druggable, top 5th percentile, and SL in all screens 
+d.DeKegel_drug %>%
+  group_by(top_5_SL_all_screens, druggable_flag) %>%
+  summarize(n = n())
+
+d.DeKegel_drug %>%
+  filter(top_5_SL_all_screens == TRUE) %>%
+  filter(druggable_flag == TRUE)
+
+```
+
+Next, since there are not many druggable paralogs that have been SL in multiple screens, I decided to look at the proportion of overall paralogs included in the De Kegel study that were screened at all: 
+```{r}
+
+d.DeKegel %>%
+  mutate(screened_flag = ifelse(n_screens >= 1, TRUE, FALSE)) %>%
+  ggplot(aes(x = screened_flag, fill = screened_flag)) +
+  geom_bar(position = "identity", color = "black") +
+  theme_classic () + 
+  theme(aspect.ratio = 0.75, 
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+d.DeKegel %>%
+  mutate(screened_flag = ifelse(n_screens >= 1, TRUE, FALSE)) %>%
+  group_by(screened_flag) %>%
+  summarize(prop_screened = (n()/nrow(d.DeKegel))) %>%
+  mutate(group_label = paste0(round(100 * prop_screened, 2), "%")) %>%
+  ungroup() %>%
+  arrange(prop_screened) %>%
+  ggplot(aes(x = "", y = prop_screened, fill = screened_flag)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar("y", start = 0) +
+  theme_void() +
+  geom_text(aes(x = 1, y = cumsum(prop_screened) - prop_screened/2, label = group_label))
+
+```
+
+
+So only ~5% of all paralogs have been included in CRISPR screens to date. This does not include the new loss of Y paper that came out, but that screened a limited number of druggable genes I think. 
+
+
+```{r}
+
+d.DeKegel_top5_druggable <- d.DeKegel_drug %>%
+  filter(top_5_percent == TRUE) %>%
+  filter(druggable_flag == TRUE)
+d.DeKegel_top5_druggable
+
+d.DeKegel_top5_druggable <- d.DeKegel_drug %>%
+  filter(top_5_percent == TRUE) %>%
+  filter(druggable_flag == TRUE)
+d.DeKegel_top5_druggable
+
+top5_druggable_genes_entrez <- d.DeKegel_top5_druggable %>%
+  dplyr::select(A1_entrez, A2_entrez) %>%
+  gather() %>%
+  distinct(value) %>%
+  pull(value)
+
+top5_druggable_genes_hgnc <- d.DeKegel_top5_druggable %>%
+  dplyr::select(A1, A2) %>%
+  gather() %>%
+  distinct(value) %>%
+  pull(value)
+
+```
+
+
+### pgPEN genes + De Kegel annotations
 
 ```{r}
 
@@ -153,7 +294,7 @@ d.Parrish_DeKegel %>%
 
 ```
 
-
+#### Family size
 ```{r}
 
 d.Parrish_DeKegel %>%
@@ -173,7 +314,7 @@ d.Parrish_DeKegel %>%
 
 This analysis showed that paralogs with >1 other family-member were less likely to be called synthetic lethal in our dataset, which makes sense given how we filtered the paralogs: we did not select only duplicate genes, Alice just filtered for those with ≥50% amino acid sequence identity with only one other paralog in the genome. Therefore, paralog pairs wtih other family-members with <50% sequence identity were included in our library. 
 
-
+#### Top 5% predicted
 ```{r}
 
 ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = top_5_percent_flag)) +
@@ -191,7 +332,7 @@ ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = top_5_percent_flag)) +
 
 This analysis showed that our top hits from the SL screen are likely real, given that paralogs that are SL in ≥1 cell line are much more likely to be in the top 5th percentile of predicted broadly SL paralogs than those that were SL in neither cell line. 
 
-
+#### In a complex
 ```{r}
 
 ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = either_in_complex)) +
@@ -205,7 +346,7 @@ ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = either_in_complex)) +
 
 This analysis shows that paralogs that are SL in ≥1 cell line are slightly more likely to be in a complex than those that aren't. 
 
-
+#### Interact
 ```{r}
 
 ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = interact)) +
@@ -219,7 +360,7 @@ ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = interact)) +
 
 This analysis shows that paralogs that physically interact are more likely to be SL in ≥1 cell line compared to those that were SL in neither cell line. 
 
-
+#### WGD vs. SSD
 ```{r}
 
 ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = WGD)) +
@@ -230,10 +371,30 @@ ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = WGD)) +
         axis.ticks = element_line(color = "black"))
 
 ```
+```{r}
+
+## pretty version for PPT
+ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, fill = WGD)) +
+  geom_bar(position = "fill", width = 0.75, color = "black") +
+  theme_classic(base_size = 12) +
+  scale_fill_manual(values = c("#31a354", "#8856a7"), labels = c("SSD", "WGD")) +
+  scale_x_discrete(labels = c("SL in neither", "SL in one", "SL in both")) +
+  ylab("Proportion") +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"), 
+        legend.title = element_blank(), 
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 12))
+# ggsave(file.path(out_dir, "pgPEN_paralog_type_vs_SL_group.pdf"),
+#        height = 3.5, width = 5, useDingbats = FALSE)
+
+```
 
 This analysis shows that most of the paralogs in our library are whole genome duplicates (WGD). This was also shown in the De Kegel et al. 2021 preprint. This also shows that paralogs that were SL in both cell lines were enriched for WGD genes. 
 
 
+#### Age
 ```{r}
 
 ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, y = mean_age, fill = broader_SL_flag)) +
@@ -247,7 +408,38 @@ ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, y = mean_age, fill = broader_
 
 ```
 
+```{r}
+
+## pretty version for PPT
+ggplot(d.Parrish_DeKegel, aes(x = broader_SL_flag, y = mean_age, fill = broader_SL_flag)) +
+  # geom_violin(alpha = 0.75) + 
+  geom_boxplot(width = 0.7) +
+  theme_classic(base_size = 12) +
+  scale_fill_manual(values = c("#aaaaaa", "#6baed6", "#2171b5")) +
+  scale_x_discrete(labels = c("SL in neither", "SL in one", "SL in both")) +
+  ylab(bquote("Phylogenetic age"~(x10^6))) +
+  theme(legend.position = "none", 
+        aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 12))
+# ggsave(file.path(out_dir, "pgPEN_paralog_age_vs_SL_group.pdf"),
+#        height = 3.5, width = 5, useDingbats = FALSE)
+
+```
 This analysis shows that SL paralogs were likely to be older. This makes sense in the context of WGD genes being more likely to be SL (see De Kegel preprint, yeast papers). 
+
+```{r}
+
+## stats
+kruskal.test(mean_age ~ broader_SL_flag, data = d.Parrish_DeKegel)
+
+pairwise.wilcox.test(d.Parrish_DeKegel$mean_age, d.Parrish_DeKegel$broader_SL_flag, 
+                     p.adjust.method = "BH")
+
+
+```
 
 
 ```{r}
@@ -265,7 +457,7 @@ ggplot(d.Parrish_DeKegel, aes(x = WGD, y = mean_age, fill = broader_SL_flag)) +
 ```
 
 
-
+#### PPI overlap
 ```{r}
 
 ggplot(d.Parrish_DeKegel_high_conf, aes(x = mean_GI_score, y = fet_ppi_overlap)) + 
@@ -285,7 +477,7 @@ This analysis compares the mean GI score across PC9 and HeLa cell lines to the P
 ## Write output
 ```{r}
 
-write_rds(d.Parrish_DeKegel, file.path(out_dir, "d.Parrish_DeKegel"))
+# write_rds(d.Parrish_DeKegel, file.path(out_dir, "d.Parrish_DeKegel"))
 
 ```
 

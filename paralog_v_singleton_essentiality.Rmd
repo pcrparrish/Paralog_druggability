@@ -133,19 +133,21 @@ d.AV_screen <- d.AV_screen %>%
 
 ```{r}
 
-d.Parrish_DeKegel %>%
+d.Parrish_DeKegel_summ <- d.Parrish_DeKegel %>%
   group_by(broader_SL_flag) %>%
   summarize(n = n()) %>%
   mutate(prop = n/sum(n))
+d.Parrish_DeKegel_summ
 
 # ggplot(d.Parrish_DeKegel, aes (y = ))
 
-d.AV_screen %>%
+d.AV_screen <- d.AV_screen %>%
   mutate(essential_flag = case_when(
     pan_essential_flag == TRUE & PC9_CS < -0.5 ~ "pan_essential",
     pan_essential_flag == FALSE & PC9_CS < -0.5 ~ "PC9_essential_only", 
-    PC9_CS >= -0.5 ~ "non_essential")) %>%
-  group_by(essential_flag) %>%
+    PC9_CS >= -0.5 ~ "non_essential")) 
+
+d.AV_screen %>%  group_by(essential_flag) %>%
   summarize(n = n()) %>%
   mutate(prop = n/sum(n))
   
@@ -155,21 +157,83 @@ d.AV_screen %>%
 ```{r}
 
 ## singletons only for Athea's data
-d.AV_screen %>%
+d.AV_screen_singletons <- d.AV_screen %>%
   filter(paralog_flag == "singleton") %>%
   mutate(essential_flag = case_when(
     pan_essential_flag == TRUE & PC9_CS < -0.5 ~ "pan_essential",
     pan_essential_flag == FALSE & PC9_CS < -0.5 ~ "PC9_essential_only", 
     PC9_CS >= -0.5 ~ "non_essential")) %>%
+  mutate(essential_flag = factor(essential_flag, levels = c("non_essential",
+                                                            "PC9_essential_only",
+                                                            "pan_essential")))
+
+d.AV_screen_singletons_summ <- d.AV_screen_singletons %>% 
   group_by(essential_flag) %>%
   summarize(n = n()) %>%
   mutate(prop = n/sum(n))
+d.AV_screen_singletons_summ
+
+```
+
+
+```{r}
+
+d.AV_screen_singletons_summ
+
+d.AV_screen_singletons_summ %>%
+  mutate(essential_flag = factor(essential_flag, levels = c("pan_essential",
+                                                            "PC9_essential_only",
+                                                            "non_essential"))) %>%
+  ggplot(aes(x = "dummy_var", y = prop, fill = essential_flag)) +
+  geom_bar(position = "fill", stat = "identity", width = 0.75, color = "black") +
+  theme_classic(base_size = 12) +
+  scale_fill_manual(values = c("#2171b5", "#6baed6", "#aaaaaa" ), 
+                    labels = c("pan-essential" , "PC9 essential only", "non-essential")) +
+  # scale_x_discrete(labels = c("SL in neither", "SL in one", "SL in both")) +
+  ylab("Proportion") +
+  ggtitle("Singletons") +
+  theme(aspect.ratio = 1.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"), 
+        axis.ticks.x = element_blank(),
+        legend.title = element_blank(), 
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        plot.title = element_text(hjust = 0.5))
+# ggsave(file.path(out_dir, "AV_PC9_screen_singleton_essentiality_groups.pdf"),
+#        height = 3.5, width = 5, useDingbats = FALSE)
+
+```
+
+```{r}
+
+d.Parrish_DeKegel_summ
+
+d.Parrish_DeKegel_summ %>%
+  mutate(broader_SL_flag = factor(broader_SL_flag, levels = c("SL_in_both",
+                                                            "SL_in_one_only",
+                                                            "SL_in_neither"))) %>%
+  ggplot(aes(x = "dummy_var", y = prop, fill = broader_SL_flag)) +
+  geom_bar(position = "fill", stat = "identity", width = 0.75, color = "black") +
+  theme_classic(base_size = 12) +
+  scale_fill_manual(values = c("#2171b5", "#6baed6", "#aaaaaa" ), 
+                    labels = c("SL in both" , "SL in one only", "not SL")) +
+  ylab("Proportion") +
+  ggtitle("Paralogs") +
+  theme(aspect.ratio = 1.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        axis.ticks.x = element_blank(),
+        legend.title = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        plot.title = element_text(hjust = 0.5))
+# ggsave(file.path(out_dir, "pgPEN_screens_paralog_essentiality_groups.pdf"),
+#        height = 3.5, width = 5, useDingbats = FALSE)
 
 ```
 
 To Do: 
-* Look at Athea's data - plot hit rate from PC9 vs. pan-essential
-* Look at Athea's data - singletons only 
 * Look at DepMap single-gene CRISPR data overall — what is the hit rate of essentiality for singletons? 
 
 

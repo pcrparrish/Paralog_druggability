@@ -1,0 +1,1437 @@
+---
+title: "pgPEN_DeKegel_comparison"
+author: "Phoebe Parrish"
+date: "2022-01-07"
+output: html_document
+---
+
+# To Do
+* update depmap version - use more recent data (I am currently using 19Q1)
+* CN as continuous variable, look at outliers (not top 2 quartiles)
+
+# Setup
+
+```{r setup, include=FALSE}
+
+# library(biomaRt)
+# library(depmap)
+# library(ExperimentHub)
+library(tidyverse)
+library(ggrepel)
+library(ggforce)
+library(ggsignif)
+library(RColorBrewer)
+library(ggpubr) # another way to do significance bars
+library(ggprism) # another significance bar package...
+library(scales) # scientific notation
+library(ggtext) # for using superscript in labels
+library(DescTools) # for robust scaling
+
+```
+
+
+## Assign variables
+```{r}
+
+date <- Sys.Date()
+
+## work laptop
+base_dir <- file.path("/Users", "pparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
+                      "01_Data", "Paralog_SL_meta_analysis")
+
+in_dir <- file.path(base_dir, "01_input_files")
+
+out_dir <- file.path(base_dir, "02_output_files")
+
+```
+
+
+## Import files
+
+```{r, message = FALSE}
+
+d.DeKegel_top5_pairs_drug_sens_cn_annot <- read_rds(file.path(out_dir, "d.DeKegel_top5_pairs_drug_sens_cn_annot"))
+
+d.Broad_drug_info <- read_csv(file.path(in_dir, "primary-screen-replicate-collapsed-treatment-info.csv"))
+
+d.Broad_secondary_auc <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
+
+d.Broad_secondary_doses <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
+
+d.drug_sens_all_genes_cn <- read_rds(file.path(out_dir, "d.drug_sens_all_genes_cn"))
+
+```
+
+### Reformat CN DF
+```{r}
+
+## keep only relevant columns
+d.DeKegel_top5_pairs_drug_sens_cn <- d.DeKegel_top5_pairs_drug_sens_cn_annot %>%
+  dplyr::select(-c(entrez_pair:prediction_rank, prediction_score:family_size,
+                   broad_id, primary_disease, subtype_disease))
+
+```
+
+
+### Useful functions
+```{r}
+
+## adjust p-values
+BH_adjust <- function(df){
+  
+  d.p_vals <- df %>%
+  arrange(p_val) %>%
+  dplyr::select(target, compound_id, p_val) 
+
+  p_vals <- d.p_vals %>%
+    arrange(p_val) %>%
+    dplyr::select(p_val) %>%
+    pull()
+  
+  fdr_vals <- p.adjust(p_vals, method = "BH")
+
+  d.fdr_vals <- tibble(fdr = fdr_vals)
+  
+  d.stats <- d.p_vals %>%
+    add_column(d.fdr_vals)
+  d.stats
+  
+  return(d.stats)
+  
+}
+
+
+```
+
+
+```{r}
+
+## summarize stats output
+summarize_stats <- function(df){
+  df_new <- df %>%
+    distinct(target, compound_id, .keep_all = TRUE)
+  
+  n_p_L0.05 <- df_new %>%
+    filter(p_val < 0.05) %>%
+    nrow()
+  
+  n_p_L0.01 <- df_new %>%
+    filter(p_val < 0.01) %>%
+    nrow()
+  
+  n_fdr_L0.05 <- df_new %>%
+    filter(fdr < 0.05) %>%
+    nrow()
+  
+  n_fdr_L0.1 <- df_new %>%
+    filter(fdr < 0.1) %>%
+    nrow()
+  
+  cat(paste("df:", deparse(substitute(df)), "\n", sep = " "))
+  cat("# target/compound pairs with\n")
+  cat(paste("p < 0.05:", n_p_L0.05, "\n", sep = " "))
+  cat(paste("p < 0.01:", n_p_L0.01, "\n", sep = " "))
+  cat(paste("FDR < 0.05:", n_fdr_L0.05, "\n", sep = " "))
+  cat(paste("FDR < 0.1:", n_fdr_L0.1, "\n\n", sep = " "))
+  
+}
+
+```
+
+# Analysis
+
+## Combined CN
+
+### Phase 1 drug sensitivity
+
+#### Quartiles/WRST
+```{r}
+
+## bin combined CN for each pair into 4 quartiles
+d.DeKegel_top5_pairs_drug_sens_combined_cn_bin <- d.DeKegel_top5_pairs_drug_sens_cn %>%
+  group_by(sorted_gene_pair) %>%
+  mutate(combined_cn_bin = ntile(combined_log_cn, n = 4)) %>%
+  ## factorized binned variable for easy plotting
+  mutate(combined_cn_bin = factor(combined_cn_bin, levels = c(1, 2, 3, 4)))
+
+## calculate the WRST p-value for bin 1 (lowest CN) vs. bin 4 (highest CN)
+d.DeKegel_top5_pairs_drug_sens_combined_cn_bin_pval_summary <- d.DeKegel_top5_pairs_drug_sens_combined_cn_bin %>%
+  filter(combined_cn_bin %in% c(1, 4)) %>%
+  group_by(sorted_gene_pair, compound_id) %>%
+  summarize("pval" = wilcox.test(dependency ~ combined_cn_bin, alternative = "less")$p.value)
+d.DeKegel_top5_pairs_drug_sens_combined_cn_bin_pval_summary
+
+## add p-values to main DF
+d.DeKegel_top5_pairs_drug_sens_combined_cn_bin_wrst <- left_join(d.DeKegel_top5_pairs_drug_sens_combined_cn_bin,
+                                                       d.DeKegel_top5_pairs_drug_sens_combined_cn_bin_pval_summary,
+                                            by = c("sorted_gene_pair", "compound_id")) %>%
+  ungroup()
+d.DeKegel_top5_pairs_drug_sens_combined_cn_bin_wrst
+
+
+
+```
+
+```{r}
+
+## FDR-adjust p-values
+pvals <- d.DeKegel_top5_pairs_drug_sens_combined_cn_bin_wrst %>%
+  distinct(sorted_gene_pair, compound_id, .keep_all = TRUE) %>%
+  arrange(pval) %>%
+  dplyr::select(pval) %>%
+  pull()
+
+fdr_vals <- p.adjust(pvals, method = "BH")
+head(fdr_vals)
+
+d.fdr_vals <- tibble(fdr = fdr_vals)
+
+d.fdr_vals %>%
+  filter(fdr < 0.05) %>%
+  nrow()
+
+d.fdr_vals %>%
+  filter(fdr < 0.1) %>%
+  nrow()
+
+d.pvals_labels <- d.DeKegel_top5_pairs_drug_sens_combined_cn_bin_wrst %>%
+  distinct(sorted_gene_pair, compound_id, .keep_all = TRUE) %>%
+  arrange(pval) %>%
+  dplyr::select(sorted_gene_pair, compound_id)
+d.pvals_labels
+
+d.fdr_vals_labeled <- d.pvals_labels %>%
+  add_column(d.fdr_vals)
+d.fdr_vals_labeled
+
+d.DeKegel_top5_pairs_drug_sens_combined_cn_bin_wrst <- d.DeKegel_top5_pairs_drug_sens_combined_cn_bin_wrst %>%
+  left_join(d.fdr_vals_labeled, by = c("sorted_gene_pair", "compound_id"))
+d.DeKegel_top5_pairs_drug_sens_combined_cn_bin_wrst
+
+```
+
+##### Plot
+Plotting FDR values from DF directly onto ggsignif(): 
+https://github.com/const-ae/ggsignif/issues/29
+https://cran.r-project.org/web/packages/ggsignif/ggsignif.pdf
+
+```{r}
+
+## plot all FDR < 0.1 pairs (sorted by FDR)
+## add my own labels!!
+
+d.plot <- d.DeKegel_top5_pairs_drug_sens_combined_cn_bin_wrst %>% 
+  ungroup() %>%
+  filter(fdr < 0.1) %>%
+  unite("gene_pair_compound_label", c("sorted_gene_pair", "compound_name"), sep = "\n", remove = FALSE) %>%
+  mutate("gene_pair_compound_label" = reorder(gene_pair_compound_label, fdr),
+         "sorted_gene_pair" = reorder(sorted_gene_pair, fdr))
+
+length <- d.plot %>%
+  ungroup() %>%
+  distinct(gene_pair_compound_label) %>%
+  nrow()
+
+# d.fdr_labels <- d.DeKegel_top5_combined_cn_drug_pair_fdr_signif %>%
+#   ungroup() %>%
+#   dplyr::select(gene_pair_compound_label, combined_cn_bin, fdr)
+  
+aspect_ratio <- 0.8
+n_rows <- 1
+n_cols <- 1
+n_pages <- ceiling(length/(n_rows*n_cols))
+
+# pdf(file.path(out_dir, paste(date, "DeKegel_top5_pairs_drug_sens_combined_cn_bin_wrst_fdr_L10.pdf", sep = "_")),
+#     width = 4, height = 2.5)
+# for(i in 1:n_pages){
+#   p <-  ggplot(d.plot, aes(x = combined_cn_bin, y = dependency, fill = combined_cn_bin)) +
+#     geom_hline(yintercept = 0) +
+#     geom_boxplot() +
+#     geom_signif(comparisons = list(c(1, 4)),
+#                 map_signif_level = FALSE,
+#                 test = "wilcox.test",
+#                 test.args = list(alternative = "less", p.adjust.method = "BH"),
+#                 # annotations = fdr_labels, # fix this to get FDR plotted direclty
+#                 textsize = 3.2) +
+#     # add_pvalue(d.fdr_labels) +
+#     ## adds 10% of space on top & bottom so p-value label will fit
+#     scale_y_continuous(expand = expansion(mult = 0.15)) +
+#     scale_fill_brewer(palette = "YlGnBu") +
+#     labs(x = "Combined_CN_bin",
+#          y = "LFC_treated_vs_DMSO") +
+#     theme_bw() +
+#     theme(aspect.ratio = aspect_ratio,
+#           axis.text = element_text(color = "black"),
+#           axis.ticks = element_line(color = "black"),
+#           legend.position = "none") +
+#     facet_wrap_paginate(~gene_pair_compound_label, scales = "free_y",
+#                         nrow = n_rows, ncol = n_cols, page = i)
+# 
+#   q <- ggplot(d.plot, aes(x = combined_cn_bin, y = (2^combined_log_cn), fill = combined_cn_bin)) +
+#     geom_hline(yintercept = 4) +
+#     geom_hline(yintercept = 3, linetype = "dashed") +
+#     geom_hline(yintercept = 5, linetype = "dashed") +
+#     geom_boxplot() +
+#     ## adds 10% of space on top & bottom so p-value label will fit
+#     # scale_y_continuous(expand = expansion(mult = 0.15)) +
+#     scale_fill_brewer(palette = "YlGnBu") +
+#     labs(x = "Combined_CN_bin",
+#          y = "Combined_CN") +
+#     coord_trans(y = "log2") +
+#     theme_bw() +
+#     theme(aspect.ratio = aspect_ratio,
+#           axis.text = element_text(color = "black"),
+#           axis.ticks = element_line(color = "black"),
+#           legend.position = "none") +
+#     facet_wrap_paginate(~gene_pair_compound_label, scales = "free_y",
+#                         nrow = n_rows, ncol = n_cols, page = i)
+#   print(ggarrange(p, q, ncol = 2, align = "hv"))
+# }
+# dev.off()
+
+```
+
+
+#### Continuous/linear regression
+
+Per Joe's suggestion from my 2021-12-14 lab meeting, I will try analyzing the data using CN as a continuous variable rather than semi-arbitrarily binning the values, since there is often not a big difference in actual CN between different bins. 
+
+I will also try to look at the CN of each individual pair-member to see if the "outliers" seem to be driven by the loss of a single paralog (although this may be more relevant for expression than CN).
+
+```{r}
+
+## test linear regression analysis and plots
+
+d.tmp <- d.DeKegel_top5_pairs_drug_sens_cn %>%
+  filter(sorted_gene_pair == "IMPDH1_IMPDH2" & compound_name == "mycophenolic-acid") %>%
+  mutate(combined_cn = 2^combined_log_cn)
+d.tmp
+
+test_lm <- lm(dependency ~ combined_log_cn, data = d.tmp)
+test_summary <- broom::glance(test_lm)
+test_summary
+
+summary(test_lm)
+min(d.tmp$combined_cn)
+max(d.tmp$dependency)
+
+d.label <- d.tmp %>%
+  group_modify(~ broom::glance(lm(dependency ~ combined_log_cn, data = .x))) %>%
+  dplyr::ungroup() %>%
+  mutate(r.squared = round(r.squared, 3),
+         p.value = scientific(p.value, 3))
+d.label
+
+## plots
+ggplot(d.tmp, aes(x = combined_cn, y = dependency)) + 
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "gray60") +
+  geom_richtext(data = d.label, 
+                aes(x = min(d.tmp$combined_cn), y = max(d.tmp$dependency),
+                ## this package can do HTML-formatting for text
+                label = paste0("r<sup>2</sup>=", r.squared, "<br>p=", p.value)),
+                ## adjust label alignment and remove borders
+                hjust = 0, vjust = 1, label.color = NA, size = 3.5,
+                ## label background = transparent, text is not
+                fill = alpha(c("white"), 0.75)) + 
+  coord_trans(x = "log2") +
+  labs(x = "Combined_copy_number", y = "LFC_drug_vs_DMSO") +
+  theme_bw() +
+  theme(aspect.ratio = 1,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+## testing out a plot where dots are colored by cell line lineage
+ggplot(d.tmp, aes(x = combined_cn, y = dependency)) + 
+  geom_point(aes(color = lineage)) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  geom_richtext(data = d.label,
+            aes(x = min(d.tmp$combined_cn), y = max(d.tmp$dependency),
+                label = paste0("r<sup>2</sup>=", r.squared, "<br>p=", p.value)),
+            hjust = 0, vjust = 1, label.color = NA, size = 3.5,
+            fill = alpha(c("white"), 0.6)) +
+  coord_trans(x = "log2") +
+  labs(x = "Combined_copy_number", y = "LFC_drug_vs_DMSO") +
+  theme_bw() +
+  theme(aspect.ratio = 1,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+## plot each paralog CN independently
+d.tmp %>%
+  dplyr::select(A1_log_cn, A2_log_cn) %>%
+  pivot_longer(cols = c(A1_log_cn, A2_log_cn),
+               names_to = "pos",
+               values_to = "log_cn") %>%
+  ggplot(aes(x = pos, y = (2^log_cn))) +
+  # geom_point() +
+  geom_boxplot(fill = "gray") +
+  coord_trans(y = "log2") +
+  labs(x = "Paralog", y = "Copy_number") +
+  scale_x_discrete(labels = c("A1", "A2")) +
+  theme_bw() +
+  theme(aspect.ratio = 1,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+
+## plot combined CN - retire
+ggplot(d.tmp, aes(x = sorted_gene_pair, y = (2^combined_log_cn))) +
+  # geom_point() +
+  geom_hline(yintercept = 4) +
+  geom_hline(yintercept = 3, linetype = "dashed") +
+  geom_hline(yintercept = 5, linetype = "dashed") +
+  geom_boxplot(fill = "gray") +
+  coord_trans(y = "log2") +
+  labs(y = "Combined_copy_number") +
+  theme_bw() +
+  theme(aspect.ratio = 1.25,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"))
+  
+```
+
+Note! This is how you can set the background of a label to be transparent while the text is not in one command (see 2nd answer on this StackOverflow post): https://stackoverflow.com/questions/48557889/ggrepel-label-with-transparent-background-but-visible-font
+
+```{r}
+
+d.tmp <- d.DeKegel_top5_pairs_drug_sens_cn %>%
+  filter((sorted_gene_pair == "IMPDH1_IMPDH2" & compound_id == "BRD-A11132253-001-08-2::2.5::HTS") |
+           sorted_gene_pair == "AURKA_AURKC" & compound_name == "ENMD-2076") %>%
+  mutate(combined_cn = 2^combined_log_cn) %>%
+  group_by(sorted_gene_pair, compound_id) %>%
+  mutate(group_label_x = min(combined_cn),
+         group_label_y = max(dependency)) %>%
+  ungroup()
+d.tmp
+
+
+d.label <- d.tmp %>%
+  group_by(sorted_gene_pair, compound_id) %>%
+  group_modify(~ broom::glance(lm(dependency ~ combined_log_cn, data = .x))) %>%
+  dplyr::ungroup() %>%
+  mutate(r.squared = round(r.squared, 3),
+         p.value = scientific(p.value, 3)) 
+d.label
+
+d.label_new <- d.tmp %>%
+  dplyr::select(sorted_gene_pair, compound_id, group_label_x, group_label_y) %>%
+  distinct(sorted_gene_pair, .keep_all = TRUE) %>%
+  right_join(d.label, by = c("sorted_gene_pair", "compound_id"))
+
+## plots
+ggplot(d.tmp, aes(x = combined_cn, y = dependency)) + 
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "gray60") +
+  geom_richtext(data = d.label, 
+                aes(x = min(d.tmp$combined_cn), y = max(d.tmp$dependency),
+                ## this package can do HTML-formatting for text
+                label = paste0("r<sup>2</sup>=", r.squared, "<br>p=", p.value)),
+                ## adjust label alignment and remove borders
+                hjust = 0, vjust = 1, label.color = NA, size = 3.5,
+                ## label background = transparent, text is not
+                fill = alpha(c("white"), 0.75)) + 
+  coord_trans(x = "log2") +
+  labs(x = "Combined_copy_number", y = "LFC_drug_vs_DMSO") +
+  theme_bw() +
+  theme(aspect.ratio = 1,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~sorted_gene_pair+compound_id, scales = "free")
+
+ggplot(d.tmp, aes(x = combined_cn, y = dependency)) + 
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "gray60") +
+  geom_richtext(data = d.label_new, 
+                aes(x = group_label_x, y = group_label_y,
+                ## this package can do HTML-formatting for text
+                label = paste0("r<sup>2</sup>=", r.squared, "<br>p=", p.value)),
+                ## adjust label alignment and remove borders
+                hjust = 0, vjust = 1, label.color = NA, size = 3.5,
+                ## label background = transparent, text is not
+                fill = alpha(c("white"), 0.75)) + 
+  coord_trans(x = "log2") +
+  labs(x = "Combined_copy_number", y = "LFC_drug_vs_DMSO") +
+  theme_bw() +
+  theme(aspect.ratio = 1,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black")) +
+  facet_wrap(~sorted_gene_pair+compound_id, scales = "free")
+
+```
+
+
+See: https://dplyr.tidyverse.org/reference/group_map.html for more info on group_map() function
+Also: https://stackoverflow.com/questions/56634033/get-summary-of-the-model-using-purrrmap-within-dplyr-piping
+
+```{r}
+
+## running lm for each sorted_gene_pair/compound_id group
+
+d.DeKegel_top5_pairs_drug_sens_combined_cn_lm_summary <- d.DeKegel_top5_pairs_drug_sens_cn %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(combined_log_cn)) %>%
+  group_by(sorted_gene_pair, compound_id) %>%
+  group_modify(~ broom::glance(lm(dependency ~ combined_log_cn, data = .x))) %>%
+  dplyr::ungroup() %>%
+  rename(r_squared = r.squared, p_val = p.value)
+d.DeKegel_top5_pairs_drug_sens_combined_cn_lm_summary
+
+## add rsquared and p-value info to main DF
+d.DeKegel_top5_pairs_drug_sens_combined_cn_lm <- d.DeKegel_top5_pairs_drug_sens_combined_cn_lm_summary %>% 
+  dplyr::select(sorted_gene_pair:r_squared, p_val) %>%
+  right_join(d.DeKegel_top5_pairs_drug_sens_cn, by = c("sorted_gene_pair", "compound_id"))
+
+```
+
+```{r}
+
+## FDR adjust p-values and add back to DF
+pvals <- d.DeKegel_top5_pairs_drug_sens_combined_cn_lm %>%
+  distinct(sorted_gene_pair, compound_id, .keep_all = TRUE) %>%
+  arrange(p_val) %>%
+  dplyr::select(p_val) %>%
+  pull()
+
+fdr_vals <- p.adjust(pvals, method = "BH")
+head(fdr_vals)
+
+d.fdr_vals <- tibble(fdr = fdr_vals)
+
+d.fdr_vals %>%
+  filter(fdr < 0.05) %>%
+  nrow()
+
+d.fdr_vals %>%
+  filter(fdr < 0.1) %>%
+  nrow()
+
+d.pvals_labels <- d.DeKegel_top5_pairs_drug_sens_combined_cn_lm %>%
+  distinct(sorted_gene_pair, compound_id, .keep_all = TRUE) %>%
+  arrange(p_val) %>%
+  dplyr::select(sorted_gene_pair, compound_id)
+d.pvals_labels
+
+d.fdr_vals_labeled <- d.pvals_labels %>%
+  add_column(d.fdr_vals)
+d.fdr_vals_labeled
+
+d.DeKegel_top5_pairs_drug_sens_combined_cn_lm <- d.DeKegel_top5_pairs_drug_sens_combined_cn_lm %>%
+  left_join(d.fdr_vals_labeled, by = c("sorted_gene_pair", "compound_id"))
+d.DeKegel_top5_pairs_drug_sens_combined_cn_lm
+
+```
+
+##### Plot
+```{r}
+
+# d.DeKegel_top5_pairs_drug_sens_combined_cn_lm
+
+## filter DF for only pairs that I want to plot
+d.drug_plot <- d.DeKegel_top5_pairs_drug_sens_combined_cn_lm %>% 
+  ungroup() %>%
+  filter(fdr < 0.1) %>%
+  mutate(combined_cn = 2^combined_log_cn) %>%
+  unite("gene_pair_compound_label", c("sorted_gene_pair", "compound_name"), sep = "\n", remove = FALSE) %>%
+  mutate("gene_pair_compound_label" = reorder(gene_pair_compound_label, fdr),
+         "sorted_gene_pair" = reorder(sorted_gene_pair, fdr))
+
+## set length of DF to plot
+length <- d.drug_plot %>%
+  ungroup() %>%
+  distinct(gene_pair_compound_label) %>%
+  nrow()
+
+## make df to label rsquared and pvalue for each plot
+d.label <- d.drug_plot %>%
+  group_by(sorted_gene_pair, compound_id) %>%
+  mutate(group_label_x = min(combined_cn),
+         group_label_y = max(dependency)) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(gene_pair_compound_label, r_squared, fdr, group_label_x, group_label_y) %>%
+  distinct(gene_pair_compound_label, .keep_all = TRUE) %>%
+  mutate(r_squared = round(r_squared, 3),
+         fdr = scientific(fdr, 3)) 
+d.label
+
+## make df to plot CN for each paralog
+d.cn_plot <- d.drug_plot %>%
+  dplyr::select(gene_pair_compound_label, A1_log_cn, A2_log_cn) %>%
+  pivot_longer(cols = c(A1_log_cn, A2_log_cn),
+               names_to = "pos",
+               values_to = "log_cn") 
+
+aspect_ratio <- 1
+n_rows <- 1
+n_cols <- 1
+n_pages <- ceiling(length/(n_rows*n_cols))
+
+# pdf(file.path(out_dir, paste(date, "d.DeKegel_top5_pairs_drug_sens_combined_cn_lm_fdr_L10.pdf", sep = "_")),
+#     width = 6, height = 3)
+# for(i in 1:n_pages){
+#   p <-  ggplot(d.drug_plot, aes(x = combined_cn, y = dependency)) +
+#     geom_hline(yintercept = 0) +
+#     geom_point(size = 1) +
+#     geom_smooth(method = lm, se = FALSE, color = "gray60") +
+#     geom_richtext(data = d.label, 
+#                   aes(x = group_label_x, y = group_label_y,
+#                   ## this package can do HTML-formatting for text
+#                   label = paste0("r<sup>2</sup>=", r_squared, "<br>FDR=", fdr)),
+#                   ## adjust label alignment and remove borders
+#                   hjust = 0, vjust = 1, label.color = NA, size = 3,
+#                   ## label background = transparent, text is not
+#                   fill = alpha(c("white"), 0.75)) + 
+#     labs(x = "Combined_CN",
+#          y = "LFC_treated_vs_DMSO") +
+#     coord_trans(x = "log2") +
+#     theme_bw() +
+#     theme(aspect.ratio = aspect_ratio,
+#           axis.text = element_text(color = "black"),
+#           axis.ticks = element_line(color = "black")) +
+#     facet_wrap_paginate(~gene_pair_compound_label, scales = "free",
+#                         nrow = n_rows, ncol = n_cols, page = i)
+# 
+#   q <- ggplot(d.cn_plot, aes(x = pos, y = (2^log_cn))) +
+#     geom_boxplot(fill = "gray", width = 0.7) +
+#     labs(x = "Paralog",
+#          y = "Copy_number") +
+#     coord_trans(y = "log2") +
+#     scale_x_discrete(labels = c("A1", "A2")) +
+#     theme_bw() +
+#     theme(aspect.ratio = aspect_ratio,
+#           axis.text = element_text(color = "black"),
+#           axis.ticks = element_line(color = "black")) +
+#     facet_wrap_paginate(~gene_pair_compound_label, scales = "free_y",
+#                         nrow = n_rows, ncol = n_cols, page = i)
+#   print(ggarrange(p, q, ncol = 2, align = "hv"))
+# }
+# dev.off()
+
+```
+
+## Single-gene
+```{r}
+
+d.drug_sens_all_genes_cn
+
+```
+### Phase 1 drug sensitivity
+
+#### Quartiles/WRST
+```{r}
+
+## bin combined CN for each pair into 4 quartiles
+d.drug_sens_all_genes_cn_bin <- d.drug_sens_all_genes_cn %>%
+  filter(!is.na(log_copy_number)) %>%
+  filter(!is.na(dependency)) %>%
+  group_by(target, compound_id) %>% # is this correct?
+  mutate(log_cn_bin = ntile(log_copy_number, n = 4)) %>%
+  ## factorized binned variable for easy plotting
+  mutate(log_cn_bin = factor(log_cn_bin, levels = c(1, 2, 3, 4)))
+
+## calculate the WRST p-value for bin 1 (lowest CN) vs. bin 4 (highest CN)
+d.drug_sens_all_genes_cn_bin_pval_summary <- d.drug_sens_all_genes_cn_bin %>%
+  filter(log_cn_bin %in% c(1, 4)) %>%
+  group_by(target, compound_id) %>%
+  summarize("p_val" = wilcox.test(dependency ~ log_cn_bin)$p.value)
+d.drug_sens_all_genes_cn_bin_pval_summary
+
+## add p-values to main DF
+d.drug_sens_all_genes_cn_bin_wrst <- left_join(d.drug_sens_all_genes_cn_bin,
+                                               d.drug_sens_all_genes_cn_bin_pval_summary,
+                                               by = c("target", "compound_id")) %>%
+  ungroup()
+d.drug_sens_all_genes_cn_bin_wrst
+
+```
+
+```{r}
+
+## FDR-adjust p-values
+p_vals <- d.drug_sens_all_genes_cn_bin_wrst %>%
+  distinct(target, compound_id, .keep_all = TRUE) %>%
+  arrange(p_val) %>%
+  dplyr::select(p_val) %>%
+  pull()
+
+fdr_vals <- p.adjust(p_vals, method = "BH")
+head(fdr_vals)
+
+d.fdr_vals <- tibble(fdr = fdr_vals)
+
+d.fdr_vals %>%
+  filter(fdr < 0.05) %>%
+  nrow()
+
+d.fdr_vals %>%
+  filter(fdr < 0.1) %>%
+  nrow()
+
+d.p_vals_labels <- d.drug_sens_all_genes_cn_bin_wrst %>%
+  distinct(target, compound_id, .keep_all = TRUE) %>%
+  arrange(p_val) %>%
+  dplyr::select(target, compound_id)
+d.p_vals_labels
+
+d.fdr_vals_labeled <- d.p_vals_labels %>%
+  add_column(d.fdr_vals)
+d.fdr_vals_labeled
+
+d.drug_sens_all_genes_cn_bin_wrst <- d.drug_sens_all_genes_cn_bin_wrst %>%
+  left_join(d.fdr_vals_labeled, by = c("target", "compound_id"))
+d.drug_sens_all_genes_cn_bin_wrst
+
+```
+
+##### Plot
+Plotting FDR values from DF directly onto ggsignif(): 
+https://github.com/const-ae/ggsignif/issues/29
+https://cran.r-project.org/web/packages/ggsignif/ggsignif.pdf
+
+```{r}
+
+## plot all FDR < 0.1 pairs (sorted by FDR)
+## add my own labels!!
+
+d.plot <- d.drug_sens_all_genes_cn_bin_wrst %>% 
+  ungroup() %>%
+  filter(fdr < 0.1) %>%
+  unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
+  mutate("target_compound_label" = reorder(target_compound_label, fdr),
+         "target" = reorder(target, fdr))
+
+length <- d.plot %>%
+  ungroup() %>%
+  distinct(target_compound_label) %>%
+  nrow()
+
+# d.fdr_labels <- d.DeKegel_top5_combined_cn_drug_pair_fdr_signif %>%
+#   ungroup() %>%
+#   dplyr::select(gene_pair_compound_label, combined_cn_bin, fdr)
+  
+aspect_ratio <- 0.8
+n_rows <- 1
+n_cols <- 1
+n_pages <- ceiling(length/(n_rows*n_cols))
+
+# pdf(file.path(out_dir, paste(date, "drug_sens_all_genes_cn_bin_wrst_fdr_L10.pdf", sep = "_")),
+#     width = 4, height = 2.5)
+# for(i in 1:n_pages){
+#   p <-  ggplot(d.plot, aes(x = log_cn_bin, y = dependency, fill = log_cn_bin)) +
+#     geom_hline(yintercept = 0) +
+#     geom_boxplot() +
+#     geom_signif(comparisons = list(c(1, 4)),
+#                 map_signif_level = FALSE,
+#                 test = "wilcox.test",
+#                 # test.args = list(alternative = "less", p.adjust.method = "BH"),
+#                 # annotations = fdr_labels, # fix this to get FDR plotted direclty
+#                 textsize = 3.2) +
+#     # add_pvalue(d.fdr_labels) +
+#     ## adds 10% of space on top & bottom so p-value label will fit
+#     scale_y_continuous(expand = expansion(mult = 0.15)) +
+#     scale_fill_brewer(palette = "YlGnBu") +
+#     labs(x = "CN_bin",
+#          y = "LFC_treated_vs_DMSO") +
+#     theme_bw() +
+#     theme(aspect.ratio = aspect_ratio,
+#           axis.text = element_text(color = "black"),
+#           axis.ticks = element_line(color = "black"),
+#           legend.position = "none") +
+#     facet_wrap_paginate(~target_compound_label, scales = "free_y",
+#                         nrow = n_rows, ncol = n_cols, page = i)
+# 
+#   q <- ggplot(d.plot, aes(x = log_cn_bin, y = (2^log_copy_number), fill = log_cn_bin)) +
+#     geom_hline(yintercept = 2) +
+#     geom_hline(yintercept = 1, linetype = "dashed") +
+#     geom_hline(yintercept = 3, linetype = "dashed") +
+#     geom_boxplot() +
+#     ## adds 10% of space on top & bottom so p-value label will fit
+#     # scale_y_continuous(expand = expansion(mult = 0.15)) +
+#     scale_fill_brewer(palette = "YlGnBu") +
+#     labs(x = "CN_bin",
+#          y = "CN") +
+#     coord_trans(y = "log2") +
+#     theme_bw() +
+#     theme(aspect.ratio = aspect_ratio,
+#           axis.text = element_text(color = "black"),
+#           axis.ticks = element_line(color = "black"),
+#           legend.position = "none") +
+#     facet_wrap_paginate(~target_compound_label, scales = "free_y",
+#                         nrow = n_rows, ncol = n_cols, page = i)
+#   print(ggarrange(p, q, ncol = 2, align = "hv"))
+# }
+# dev.off()
+
+```
+
+#### Continuous/linear regression
+
+```{r}
+
+## running lm for each sorted_gene_pair/compound_id group
+
+d.drug_sens_all_genes_cn_lm_summary <- d.drug_sens_all_genes_cn %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(log_copy_number)) %>%
+  group_by(target, compound_id) %>%
+  group_modify(~ broom::glance(lm(dependency ~ log_copy_number, data = .x))) %>%
+  dplyr::ungroup() %>%
+  rename(r_squared = r.squared, p_val = p.value)
+d.drug_sens_all_genes_cn_lm_summary
+
+## add rsquared and p-value info to main DF
+d.drug_sens_all_genes_cn_lm <- d.drug_sens_all_genes_cn_lm_summary %>%
+  dplyr::select(target:r_squared, p_val) %>%
+  right_join(d.drug_sens_all_genes_cn, by = c("target", "compound_id"))
+
+```
+
+```{r}
+
+## FDR adjust p-values and add back to DF
+p_vals <- d.drug_sens_all_genes_cn_lm %>%
+  distinct(target, compound_id, .keep_all = TRUE) %>%
+  arrange(p_val) %>%
+  dplyr::select(p_val) %>%
+  pull()
+
+fdr_vals <- p.adjust(p_vals, method = "BH")
+head(fdr_vals)
+
+d.fdr_vals <- tibble(fdr = fdr_vals)
+
+d.fdr_vals %>%
+  filter(fdr < 0.05) %>%
+  nrow()
+
+d.fdr_vals %>%
+  filter(fdr < 0.1) %>%
+  nrow()
+
+d.p_vals_labels <- d.drug_sens_all_genes_cn_lm %>%
+  distinct(target, compound_id, .keep_all = TRUE) %>%
+  arrange(p_val) %>%
+  dplyr::select(target, compound_id)
+d.p_vals_labels
+
+d.fdr_vals_labeled <- d.p_vals_labels %>%
+  add_column(d.fdr_vals)
+d.fdr_vals_labeled
+
+d.drug_sens_all_genes_cn_lm <- d.drug_sens_all_genes_cn_lm %>%
+  left_join(d.fdr_vals_labeled, by = c("target", "compound_id"))
+d.drug_sens_all_genes_cn_lm
+
+```
+
+##### Plot
+```{r}
+
+# d.DeKegel_top5_pairs_drug_sens_combined_cn_lm
+
+## filter DF for only pairs that I want to plot
+d.drug_plot <- d.drug_sens_all_genes_cn_lm %>% 
+  ungroup() %>%
+  filter(fdr < 0.1) %>%
+  # mutate(cn = 2^log_copy_number) %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(log_copy_number)) %>%
+  unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
+  mutate("target_compound_label" = reorder(target_compound_label, fdr),
+         "target" = reorder(target, fdr))
+
+## set length of DF to plot
+length <- d.drug_plot %>%
+  ungroup() %>%
+  distinct(target_compound_label) %>%
+  nrow()
+
+## make df to label rsquared and pvalue for each plot
+d.label <- d.drug_plot %>%
+  group_by(target, compound_id) %>%
+  mutate(group_label_x = min(log_copy_number),
+         group_label_y = max(dependency)) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(target_compound_label, r_squared, fdr, group_label_x, group_label_y) %>%
+  distinct(target_compound_label, .keep_all = TRUE) %>%
+  mutate(r_squared = round(r_squared, 3),
+         fdr = scientific(fdr, 3)) 
+d.label
+
+## make df to plot CN for each paralog
+# d.cn_plot <- d.drug_plot %>%
+#   dplyr::select(target_compound_label, log_copy_number) 
+
+aspect_ratio <- 1
+n_rows <- 1
+n_cols <- 1
+n_pages <- ceiling(length/(n_rows*n_cols))
+
+# pdf(file.path(out_dir, paste(date, "drug_sens_all_genes_cn_lm_fdr_L10.pdf", sep = "_")),
+#     width = 4, height = 3)
+# for(i in 1:n_pages){
+#   p <-  ggplot(d.drug_plot, aes(x = log_copy_number, y = dependency)) +
+#     geom_hline(yintercept = 0) +
+#     geom_point(size = 1) +
+#     geom_smooth(method = lm, se = FALSE, color = "gray60") +
+#     geom_richtext(data = d.label,
+#                   aes(x = group_label_x, y = group_label_y,
+#                   ## this package can do HTML-formatting for text
+#                   label = paste0("r<sup>2</sup>=", r_squared, "<br>FDR=", fdr)),
+#                   ## adjust label alignment and remove borders
+#                   hjust = 0, vjust = 1, label.color = NA, size = 3,
+#                   ## label background = transparent, text is not
+#                   fill = alpha(c("white"), 0.75)) +
+#     labs(x = "Log_copy_number",
+#          y = "LFC_treated_vs_DMSO") +
+#     # coord_trans(x = "log2") +
+#     theme_bw() +
+#     theme(aspect.ratio = aspect_ratio,
+#           axis.text = element_text(color = "black"),
+#           axis.ticks = element_line(color = "black")) +
+#     facet_wrap_paginate(~target_compound_label, scales = "free",
+#                         nrow = n_rows, ncol = n_cols, page = i)
+# 
+#   # q <- ggplot(d.cn_plot, aes(x = pos, y = (2^log_cn))) +
+#   #   geom_boxplot(fill = "gray", width = 0.7) +
+#   #   labs(x = "Paralog",
+#   #        y = "Copy_number") +
+#   #   coord_trans(y = "log2") +
+#   #   scale_x_discrete(labels = c("A1", "A2")) +
+#   #   theme_bw() +
+#   #   theme(aspect.ratio = aspect_ratio,
+#   #         axis.text = element_text(color = "black"),
+#   #         axis.ticks = element_line(color = "black")) +
+#   #   facet_wrap_paginate(~gene_pair_compound_label, scales = "free_y",
+#   #                       nrow = n_rows, ncol = n_cols, page = i)
+#   print(ggarrange(p, ncol = 1, align = "hv"))
+# }
+# dev.off()
+
+```
+
+```{r}
+# 
+# ## make volcano plot of r^2 vs. FDR...or something (how to indicate neg vs pos?)
+# d.volcano_plot <- d.drug_sens_all_genes_cn_lm %>% 
+#   ungroup() %>%
+#   # mutate(cn = 2^log_copy_number) %>%
+#   filter(!is.na(dependency)) %>%
+#   filter(!is.na(log_copy_number)) %>%
+#   unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
+#   mutate("target_compound_label" = reorder(target_compound_label, fdr),
+#          "target" = reorder(target, fdr))
+# 
+# ggplot(d.volcano_plot, aes(x = r_squared, y = -log10(fdr))) +
+#   geom_point()
+
+```
+
+```{r}
+
+# phase1_cn_labels <- d.phase1_cn_volcano_plot %>%
+#   filter(fdr < 0.1) %>%
+#   pull(new_label)
+# 
+# ggplot(d.phase1_cn_volcano_plot, aes(x = lfc_dependency_Q1_v_Q4, y = -log10(fdr))) +
+#   geom_hline(yintercept = 1, linetype = "dashed") +
+#   geom_vline(xintercept = 0, linetype = "dashed") +
+#   geom_point(color = ifelse(d.phase1_cn_volcano_plot$fdr < 0.1, "black", "gray50")) +
+#   geom_label_repel(data = subset(d.phase1_cn_volcano_plot, fdr < 0.1),
+#                    aes(label = phase1_cn_labels), 
+#                    segment.size = 0.2,
+#                    force = 0.5,
+#                    size = 2.5, 
+#                    alpha = 0.8, 
+#                    max.overlaps = Inf) +
+#   theme_bw() +
+#   theme(aspect.ratio = 0.75,
+#         axis.text = element_text(color = "black"),
+#         axis.ticks = element_line(color = "black"))
+# # ggsave(file.path(out_dir, "d.DeKegel_top5_combined_cn_drug_pair_median_dependency_lfc_fdr_volcano_plot.pdf"),
+# #        width = 6, height = 4, useDingbats = FALSE)
+
+```
+
+
+### Z-scaled outliers
+
+```{r}
+
+## bin combined CN for each pair into 4 quartiles
+d.drug_sens_all_genes_cn_outlier <- d.drug_sens_all_genes_cn %>%
+  filter(!is.na(log_copy_number)) %>%
+  filter(!is.na(dependency)) %>%
+  group_by(target, compound_id) %>% # is this correct?
+  mutate(scaled_log_cn = RobScale(log_copy_number, center = TRUE, scale = TRUE)) %>%
+  mutate(cn_outlier_flag = case_when(
+    scaled_log_cn < -2 ~ "low",
+    scaled_log_cn > 2 ~ "high", 
+    TRUE ~ "neither")) %>%
+  mutate(cn_low_flag = case_when(
+    scaled_log_cn < -2 ~ TRUE,
+    TRUE ~ FALSE)) %>% ## if CN ≥ -2, classify as "not low"
+  ungroup()
+
+d.drug_sens_all_genes_cn_outlier %>%
+  group_by(cn_outlier_flag) %>%
+  summarize(n = n())
+
+d.drug_sens_all_genes_cn_outlier %>%
+  group_by(cn_low_flag) %>%
+  summarize(n = n())
+
+d.drug_sens_all_genes_cn_outlier %>%
+  group_by(target, compound_id) %>%
+  distinct(cn_low_flag) %>%
+  summarize(n = n()) %>%
+  filter(n < 2)
+
+## calculate the WRST p-value for low-CN vs. not low-CN cell lines
+d.drug_sens_all_genes_cn_outlier_wrst_summary <- d.drug_sens_all_genes_cn_outlier %>%
+  group_by(target, compound_id) %>%
+  filter(any(cn_low_flag == TRUE)) %>% ## keep only groups where >1 cell line has low CN
+  summarize("p_val" = wilcox.test(dependency ~ cn_low_flag)$p.value)
+d.drug_sens_all_genes_cn_outlier_wrst_summary
+
+## add p-values to main DF
+d.drug_sens_all_genes_cn_outlier_wrst <- left_join(d.drug_sens_all_genes_cn_outlier,
+                                                   d.drug_sens_all_genes_cn_outlier_wrst_summary,
+                                                   by = c("target", "compound_id")) %>%
+  ungroup()
+d.drug_sens_all_genes_cn_outlier_wrst
+
+
+## from script: CRISPR_screens/02_iCas9-HeLa/04_NGS_analysis/mageck/00_scripts/06_SL_paralog_druggability_and_expression.Rmd
+
+# ## calculate z-score for expression using scale() function
+# d.paralog.tpm.scaled <- d.paralog.tpm %>%
+#   group_by(gene_name, primary_disease) %>%
+#   mutate(tissue_expr_scaled=RobScale(expression, center=TRUE, scale=TRUE)) %>% # calculate z-score using scale()
+#   mutate(tissue_expr_outlier_broad=ifelse(abs(tissue_expr_scaled) > 2, TRUE, FALSE)) %>%
+#   mutate(tissue_expr_outlier_narrow=ifelse(is.na(tissue_expr_scaled), "NA", 
+#                                            ifelse(tissue_expr_scaled < -2, "negative",
+#                                                   ifelse(tissue_expr_scaled > 2, "positive", "neither")))) %>%
+#   ungroup()
+
+```
+
+```{r}
+
+## FDR adjust p-values and add back to DF
+p_vals <- d.drug_sens_all_genes_cn_outlier_wrst %>%
+  distinct(target, compound_id, .keep_all = TRUE) %>%
+  arrange(p_val) %>%
+  dplyr::select(p_val) %>%
+  pull()
+
+fdr_vals <- p.adjust(p_vals, method = "BH")
+head(fdr_vals)
+
+d.fdr_vals <- tibble(fdr = fdr_vals)
+
+d.fdr_vals %>%
+  filter(fdr < 0.05) %>%
+  nrow()
+
+d.fdr_vals %>%
+  filter(fdr < 0.1) %>%
+  nrow()
+
+d.p_vals_labels <- d.drug_sens_all_genes_cn_outlier_wrst %>%
+  distinct(target, compound_id, .keep_all = TRUE) %>%
+  arrange(p_val) %>%
+  dplyr::select(target, compound_id)
+d.p_vals_labels
+
+d.fdr_vals_labeled <- d.p_vals_labels %>%
+  add_column(d.fdr_vals)
+d.fdr_vals_labeled
+
+d.drug_sens_all_genes_cn_outlier_wrst <- d.drug_sens_all_genes_cn_outlier_wrst %>%
+  left_join(d.fdr_vals_labeled, by = c("target", "compound_id"))
+d.drug_sens_all_genes_cn_outlier_wrst
+
+```
+
+#### Plot
+```{r}
+
+## plot all p < 0.001 pairs (sorted by p-val)
+## add my own labels!!
+
+d.plot <- d.drug_sens_all_genes_cn_outlier_wrst %>% 
+  ungroup() %>%
+  filter(p_val < 0.001) %>%
+  unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
+  mutate("target_compound_label" = reorder(target_compound_label, fdr),
+         "target" = reorder(target, fdr)) %>%
+  mutate(cn_low_flag = factor(cn_low_flag, levels = c(TRUE, FALSE)))
+
+length <- d.plot %>%
+  ungroup() %>%
+  distinct(target_compound_label) %>%
+  nrow()
+
+# d.cn_plot <- d.plot %>%
+#   dplyr::select(target_compound_label, target, log_copy_number, cn_low_flag) 
+  
+aspect_ratio <- 0.8
+n_rows <- 1
+n_cols <- 1
+n_pages <- ceiling(length/(n_rows*n_cols))
+
+# pdf(file.path(out_dir, paste(date, "drug_sens_all_genes_cn_outlier_wrst_p_L0.001.pdf", sep = "_")),
+#     width = 6, height = 3)
+# for(i in 1:n_pages){
+#   p <-  ggplot(d.plot, aes(x = cn_low_flag, y = dependency)) +
+#     geom_hline(yintercept = 0) +
+#     geom_jitter(aes(color = cn_low_flag), width = 0.3) +
+#     geom_boxplot(alpha = 0) +
+#     geom_signif(comparisons = list(c(1, 2)),
+#                 map_signif_level = FALSE,
+#                 test = "wilcox.test",
+#                 # test.args = list(alternative = "less", p.adjust.method = "BH"),
+#                 # annotations = fdr_labels, # fix this to get FDR plotted direclty
+#                 textsize = 3.2) +
+#     # add_pvalue(d.fdr_labels) +
+#     ## adds 10% of space on top & bottom so p-value label will fit
+#     scale_y_continuous(expand = expansion(mult = 0.15)) +
+#     scale_color_manual(values = c("blue", "gray50")) +
+#     labs(x = "CN_outlier_low",
+#          y = "LFC_treated_vs_DMSO") +
+#     theme_bw() +
+#     theme(aspect.ratio = aspect_ratio,
+#           axis.text = element_text(color = "black"),
+#           axis.ticks = element_line(color = "black"),
+#           legend.position = "none") +
+#     facet_wrap_paginate(~target_compound_label, scales = "free_y",
+#                         nrow = n_rows, ncol = n_cols, page = i)
+# 
+#   q <- ggplot(d.plot, aes(x = target, y = (2^log_copy_number))) +
+#     geom_hline(yintercept = 2) +
+#     geom_hline(yintercept = 1, linetype = "dashed") +
+#     geom_hline(yintercept = 3, linetype = "dashed") +
+#     geom_jitter(aes(color = cn_low_flag), width = 0.3) +
+#     geom_boxplot(alpha = 0) +
+#     ## adds 10% of space on top & bottom so p-value label will fit
+#     # scale_y_continuous(expand = expansion(mult = 0.15)) +
+#     scale_color_manual(values = c("blue", "gray50")) +
+#     labs(x = "target", y = "CN") +
+#     coord_trans(y = "log2") +
+#     theme_bw() +
+#     theme(aspect.ratio = aspect_ratio,
+#           axis.text = element_text(color = "black"),
+#           axis.ticks = element_line(color = "black")) +
+#     facet_wrap_paginate(~target_compound_label, scale = "free",
+#                         nrow = n_rows, ncol = n_cols, page = i)
+#   print(ggarrange(p, q, ncol = 2, align = "hv", common.legend = TRUE, legend = "right"))
+# }
+# dev.off()
+
+```
+
+```{r}
+
+d.plot <- d.drug_sens_all_genes_cn_outlier_wrst %>% 
+  ungroup() %>%
+  filter(p_val < 0.001) %>%
+  unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
+  mutate("target_compound_label" = reorder(target_compound_label, fdr),
+         "target" = reorder(target, fdr)) %>%
+  filter(target_compound_label == "GBF1\ngolgicide-a" | target_compound_label == "ASPH\nsuccinic-acid" |
+           target_compound_label == "PDE4A\ndipyridamole")
+d.plot
+
+ggplot(d.plot, aes(x = target, y = (2^log_copy_number))) +
+    geom_hline(yintercept = 2) +
+    geom_hline(yintercept = 1, linetype = "dashed") +
+    geom_hline(yintercept = 3, linetype = "dashed") +
+    geom_jitter(aes(color = cn_low_flag), width = 0.3) +
+    geom_boxplot(alpha = 0) +
+    ## adds 10% of space on top & bottom so p-value label will fit
+    # scale_y_continuous(expand = expansion(mult = 0.15)) +
+    scale_color_manual(values = c("darkgray", "blue")) +
+    labs(x = "target",
+         y = "CN") +
+    coord_trans(y = "log2") +
+    theme_bw() +
+    theme(aspect.ratio = 1.25,
+          axis.text = element_text(color = "black"),
+          axis.ticks = element_line(color = "black")) +
+    facet_wrap(~target, scale = "free")
+
+```
+
+#### + and - outliers
+```{r}
+
+d.drug_sens_all_genes_cn_outlier <- d.drug_sens_all_genes_cn_outlier %>%
+  mutate(cn_outlier_flag = factor(cn_outlier_flag, levels = c("low", "neither", "high"))) 
+
+```
+
+
+```{r}
+
+
+d.drug_sens_all_genes_cn_outlier %>%
+  group_by(target, compound_id, cn_outlier_flag) %>%
+  summarize(n = n()) %>%
+  group_by(cn_outlier_flag) %>%
+  summarize(mean = mean(n),
+            median = median(n))
+
+## how many compounds/targets have 0 high or low outlier cell lines?
+d.drug_sens_all_genes_cn_outlier %>%
+  group_by(target, compound_id, cn_outlier_flag) %>%
+  summarize(n = n()) 
+
+d.drug_sens_all_genes_cn_outlier %>%
+  group_by(target, compound_id, cn_outlier_flag) %>%
+  summarize(n = n()) %>%
+  ungroup() %>%
+  group_by(target, compound_id) %>%
+  summarize(n = n())
+  
+
+```
+
+```{r}
+
+## low vs. neither (with high included but ignoring it) => 
+## calculate diff in median LFC between relevant groups
+
+d.drug_sens_all_genes_cn_outlier_low <- d.drug_sens_all_genes_cn_outlier %>%
+  group_by(target, compound_id) %>%
+  ## get rid of drug/targets that don't have any "low" cell lines
+  filter(any(cn_outlier_flag == "low")) %>%
+  ungroup() 
+
+d.drug_sens_all_genes_cn_outlier_low_grp_med_diff <- d.drug_sens_all_genes_cn_outlier_low %>%
+  group_by(target, compound_id, cn_outlier_flag) %>%
+  ## calculate median dependency score for each outlier group
+  summarize(grp_med_dependency = median(dependency)) %>%
+  pivot_wider(names_from = cn_outlier_flag, values_from = grp_med_dependency) %>%
+  ## calculate difference between low and neither groups
+  mutate(grp_med_diff = low - neither) %>%
+  dplyr::select(target, compound_id, grp_med_diff) 
+
+d.drug_sens_all_genes_cn_outlier_low <- d.drug_sens_all_genes_cn_outlier_low %>%
+  left_join(d.drug_sens_all_genes_cn_outlier_low_grp_med_diff, by = c("target", "compound_id"))
+
+## high vs. neither (with low included but ignoring it) => 
+## calculate diff in median LFC between relevant groups =>
+d.drug_sens_all_genes_cn_outlier_high <- d.drug_sens_all_genes_cn_outlier %>%
+  group_by(target, compound_id) %>%
+  ## get rid of drug/targets that don't have any "high" cell lines
+  filter(any(cn_outlier_flag == "high")) %>%
+  ungroup() 
+
+d.drug_sens_all_genes_cn_outlier_high_grp_med_diff <- d.drug_sens_all_genes_cn_outlier_high %>%
+  group_by(target, compound_id, cn_outlier_flag) %>%
+  ## calculate median dependency score for each outlier group
+  summarize(grp_med_dependency = median(dependency)) %>%
+  pivot_wider(names_from = cn_outlier_flag, values_from = grp_med_dependency) %>%
+  ## calculate difference between low and neither groups
+  mutate(grp_med_diff = high - neither) %>%
+  dplyr::select(target, compound_id, grp_med_diff) 
+
+d.drug_sens_all_genes_cn_outlier_high <- d.drug_sens_all_genes_cn_outlier_high %>%
+  left_join(d.drug_sens_all_genes_cn_outlier_high_grp_med_diff, by = c("target", "compound_id"))
+
+```
+
+```{r}
+
+## low outliers and drug sensitivity
+## calculate p-value (adjusted for multiple within-group tests?)
+d.drug_sens_all_genes_cn_outlier_low_wrst_sens_pvals <- d.drug_sens_all_genes_cn_outlier_low %>%
+  ## remove cell lines that are high outliers (I think this makes sense... but I'm not sure)
+  filter(cn_outlier_flag != "high" & grp_med_diff < 0) %>%
+  group_by(target, compound_id) %>%
+  summarize(p_val = wilcox.test(dependency ~ cn_outlier_flag, alternative = "less")$p.value)
+# d.drug_sens_all_genes_cn_outlier_low_wrst_sens_pvals
+
+## adjust for multiple testing overall
+d.stats <- BH_adjust(d.drug_sens_all_genes_cn_outlier_low_wrst_sens_pvals)
+# d.stats
+
+d.drug_sens_all_genes_cn_outlier_low_wrst_sens <- d.drug_sens_all_genes_cn_outlier_low %>%
+  left_join(d.stats, by = c("target", "compound_id"))
+# d.drug_sens_all_genes_cn_outlier_low_wrst_sens
+
+## low outliers and drug resistance
+## calculate p-value
+d.drug_sens_all_genes_cn_outlier_low_wrst_resist_pvals <- d.drug_sens_all_genes_cn_outlier_low %>%
+  ## remove cell lines that are high outliers (I think this makes sense... but I'm not sure)
+  filter(cn_outlier_flag != "high" & grp_med_diff > 0) %>%
+  group_by(target, compound_id) %>%
+  summarize(p_val = wilcox.test(dependency ~ cn_outlier_flag, alternative = "greater")$p.value)
+# d.drug_sens_all_genes_cn_outlier_low_wrst_resist_pvals
+
+## adjust for multiple testing overall
+d.stats <- BH_adjust(d.drug_sens_all_genes_cn_outlier_low_wrst_resist_pvals)
+# d.stats
+
+d.drug_sens_all_genes_cn_outlier_low_wrst_resist <- d.drug_sens_all_genes_cn_outlier_low %>%
+  left_join(d.stats, by = c("target", "compound_id"))
+
+# d.drug_sens_all_genes_cn_outlier_low_wrst_resist
+
+## high outliers and drug sensitivity
+d.drug_sens_all_genes_cn_outlier_high_wrst_sens_pvals <- d.drug_sens_all_genes_cn_outlier_high %>%
+  ## remove cell lines that are high outliers (I think this makes sense... but I'm not sure)
+  filter(cn_outlier_flag != "low" & grp_med_diff < 0) %>%
+  group_by(target, compound_id) %>%
+  summarize(p_val = wilcox.test(dependency ~ cn_outlier_flag, alternative = "greater")$p.value)
+# d.drug_sens_all_genes_cn_outlier_high_wrst_sens_pvals
+
+## adjust for multiple testing overall
+d.stats <- BH_adjust(d.drug_sens_all_genes_cn_outlier_high_wrst_sens_pvals)
+# d.stats
+
+d.drug_sens_all_genes_cn_outlier_high_wrst_sens <- d.drug_sens_all_genes_cn_outlier_high %>%
+  left_join(d.stats, by = c("target", "compound_id"))
+# d.drug_sens_all_genes_cn_outlier_high_wrst_sens
+
+## high outliers and drug resistance
+d.drug_sens_all_genes_cn_outlier_high_wrst_resist_pvals <- d.drug_sens_all_genes_cn_outlier_high %>%
+  ## remove cell lines that are high outliers (I think this makes sense... but I'm not sure)
+  filter(cn_outlier_flag != "low" & grp_med_diff > 0) %>%
+  group_by(target, compound_id) %>%
+  summarize(p_val = wilcox.test(dependency ~ cn_outlier_flag, alternative = "less")$p.value)
+# d.drug_sens_all_genes_cn_outlier_high_wrst_resist_pvals
+
+## adjust for multiple testing overall
+d.stats <- BH_adjust(d.drug_sens_all_genes_cn_outlier_high_wrst_resist_pvals)
+# d.stats
+
+d.drug_sens_all_genes_cn_outlier_high_wrst_resist <- d.drug_sens_all_genes_cn_outlier_high %>%
+  left_join(d.stats, by = c("target", "compound_id"))
+# d.drug_sens_all_genes_cn_outlier_high_wrst_resist
+
+
+```
+
+```{r}
+
+## low outliers
+summarize_stats(d.drug_sens_all_genes_cn_outlier_low_wrst_sens)
+summarize_stats(d.drug_sens_all_genes_cn_outlier_low_wrst_resist)
+
+## high outliers
+summarize_stats(d.drug_sens_all_genes_cn_outlier_high_wrst_sens)
+summarize_stats(d.drug_sens_all_genes_cn_outlier_high_wrst_resist)
+
+```
+
+For deparsing variables to use in dplyr: https://cran.r-project.org/web/packages/dplyr/vignettes/programming.html
+```{r}
+
+make_outlier_plot <- function(df, direction, col_name, stat_cutoff){
+  
+  ## save col_name as a string for later use
+  stat_name <- deparse(substitute(col_name))
+
+  d.plot <- df %>% 
+    ungroup() %>%
+    ##use {{}} to deparse variable name for use in dplyr functions
+    filter({{col_name}} < stat_cutoff) %>%
+    unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
+    mutate("target_compound_label" = reorder(target_compound_label, {{col_name}}),
+           "target" = reorder(target, {{col_name}})) #%>%
+
+  ## make df to label adjusted FDR/p-val for each plot
+  d.label <- d.plot %>%
+    group_by(target, compound_id) %>%
+    mutate(y.position = (max(dependency) + 0.1*(max(dependency) - min(dependency)))) %>%
+    dplyr::ungroup() %>%
+    dplyr::select(target_compound_label, p_val, fdr, y.position) %>%
+    distinct(target_compound_label, .keep_all = TRUE) %>%
+    mutate(group1 = direction,
+           group2 = "neither",
+           p_val = scientific(p_val, 3),
+           fdr = scientific(fdr, 3)) 
+  d.label
+  
+  length <- d.plot %>%
+    ungroup() %>%
+    distinct(target_compound_label) %>%
+    nrow()
+    
+  aspect_ratio <- 1
+  n_rows <- 1
+  n_cols <- 1
+  n_pages <- ceiling(length/(n_rows*n_cols))
+  
+  ## make stat label for labeling significance brackets
+  stat_label <- paste0(toupper(stat_name), " = ", "{", stat_name, "}")
+
+  ## remove the first 2 characters of dataframe name
+  df_name <- str_sub(deparse(substitute(df)), start = 3)
+
+  ## save output file name
+  file_name <- paste(date, df_name, stat_name, "L", stat_cutoff, ".pdf", sep = "_")
+
+  pdf(file.path(out_dir, file_name), width = 6, height = 3)
+  for(i in 1:n_pages){
+    p <-  ggplot(d.plot, aes(x = cn_outlier_flag, y = dependency)) +
+      geom_hline(yintercept = 0) +
+      geom_jitter(aes(color = cn_outlier_flag), width = 0.3) +
+      geom_boxplot(alpha = 0) +
+      stat_pvalue_manual(d.label, label = stat_label, tip.length = 0.03, size = 3, vjust = -0.5) +
+      ## adds extra space on top & bottom so p-value label will fit
+      scale_y_continuous(expand = expansion(mult = 0.15)) +
+      scale_color_manual(values = c("low" = "blue", "neither" = "gray50", "high" = "red")) +
+      labs(x = "CN_group",
+           y = "LFC_treated_vs_DMSO") +
+      theme_bw() +
+      theme(aspect.ratio = aspect_ratio,
+            axis.text = element_text(color = "black"),
+            axis.ticks = element_line(color = "black"),
+            legend.position = "none") +
+      facet_wrap_paginate(~target_compound_label, scales = "free_y",
+                          nrow = n_rows, ncol = n_cols, page = i)
+
+    q <- ggplot(d.plot, aes(x = target, y = (2^log_copy_number))) +
+      geom_jitter(aes(color = cn_outlier_flag), width = 0.3) +
+      geom_boxplot(alpha = 0) +
+      scale_color_manual(values = c("low" = "blue", "neither" = "gray50", "high" = "red")) +
+      labs(x = "Target", y = "Copy_number") +
+      coord_trans(y = "log2") +
+      theme_bw() +
+      theme(aspect.ratio = aspect_ratio,
+            axis.text = element_text(color = "black"),
+            axis.ticks = element_line(color = "black")) +
+      facet_wrap_paginate(~target_compound_label, scale = "free",
+                          nrow = n_rows, ncol = n_cols, page = i)
+    print(ggarrange(p, q, ncol = 2, align = "hv", common.legend = TRUE, legend = "right"))
+  }
+  dev.off()
+  
+}
+
+
+```
+
+
+
+```{r}
+
+# d.drug_sens_all_genes_cn_outlier_low_wrst_sens
+
+# make_outlier_plot(d.drug_sens_all_genes_cn_outlier_low_wrst_sens, "low", fdr, 0.1)
+
+# d.drug_sens_all_genes_expr_outlier_low_wrst_resist = 0 FDR < 0.1 - skip
+
+# make_outlier_plot(d.drug_sens_all_genes_cn_outlier_high_wrst_sens, "high", fdr, 0.1)
+
+# make_outlier_plot(d.drug_sens_all_genes_cn_outlier_high_wrst_resist, "high", fdr, 0.1)
+
+```
+
+
+
+
+
+
