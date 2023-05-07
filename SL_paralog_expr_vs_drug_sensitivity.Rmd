@@ -2026,8 +2026,8 @@ d.DeKegel_top5_pairs_drug_sens_expr %>%
     TRUE ~ "neither")) %>%
   mutate(scaled_A1_log_tpm = RobScale(A1_log_tpm, center = TRUE, scale = TRUE)) %>%
   mutate(A1_expr_outlier_flag = case_when(
-    scaled_A1_log_tpm < -2 ~ "low",
-    scaled_A1_log_tpm > 2 ~ "high",
+    scaled_A1_log_tpm < -1.5 ~ "low",
+    scaled_A1_log_tpm > 1.5 ~ "high", ## before 22-04-26 this said 2
     TRUE ~ "neither")) %>%
   ungroup() %>%
   mutate(A2_expr_outlier_flag = factor(A2_expr_outlier_flag, levels = c("low", "neither", "high")))%>%
