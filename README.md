@@ -1,4 +1,4 @@
-# Paralog_SL_meta_analysis
+# Paralog_druggability
 
 ## To Do:
 * Actually remove Finan filtering step from expr and CN DFs
