@@ -4,6 +4,7 @@
 .Ruserdata
 .RDataTmp
 .DS_Store
+renv/
 CCNL1-CCNL2-DE-in-A549.csv
 *.png
 # ignore all input and output files
