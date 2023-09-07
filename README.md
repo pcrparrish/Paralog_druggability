@@ -13,7 +13,7 @@ I therefore analyzed an [existing dataset](https://www.nature.com/articles/s4301
 ## Approach and Results
 To identify druggable paralog dependencies, I used a two-tiered approach: first, I applied a discovery-focused linear regression analysis to identify cases where low expression of one paralog was significantly associated with lower viability when cancer cells were treated with an inhibitor targeting that paralog family. This first analysis identified 68 cases where loss of expression of one family-member was significantly associated with increased sensitivity to drugs targeting that gene family (FDR < 0.05 via Benjamini-Hochberg correction). Results for the top six hits from this first analysis are shown below in panels A-F:
 ![Top hits from linear regression analysis](https://github.com/pcrparrish/Paralog_druggability/blob/main/resources/lm_analysis_top_hits.png?raw=true)
-**(A)**	Left panel, scatterplot of Gene A2 expression versus cell viability in drug treatment for *AKT1/AKT3* and MK-2206. Right panel, Gene A1 and Gene A2 expression across PRISM cell lines for *AKT1/AKT3*. Cell viability is measured as the log2(fold-change) in drug versus control (DMSO) treatment. Gene expression is measured as log2(TPM). For each pair, Gene A1 refers to the first gene listed (in this case, *AKT1*) and Gene A2 refers to the second member of the pair (here, *AKT3*). 
+**(A)**	Left panel, scatterplot of Gene A2 expression versus cell viability in drug treatment for *AKT1/AKT3* and MK-2206. Right panel, Gene A1 and Gene A2 expression across PRISM cell lines for *AKT1/AKT3*. Cell viability is measured as the log<sub>2</sub>(fold-change) in drug versus control (DMSO) treatment. Gene expression is measured as log<sub>2</sub>(TPM). For each pair, Gene A1 refers to the first gene listed (in this case, *AKT1*) and Gene A2 refers to the second member of the pair (here, *AKT3*). 
 **(B)**	As in (A), but for *ABL1/ABL2* and saracatinib. 
 **(C)**	As in (A), but for *PTPN11/PTPN6* and BVT-948. 
 **(D)**	As in (A), but for *CDK1/CDK2* and NU6027. 
@@ -25,7 +25,7 @@ I then used a more stringent outlier-based analysis to confirm my findings for 1
 ![Outlier analysis hits](https://github.com/pcrparrish/Paralog_druggability/blob/main/resources/AKT_family_AKTi.png?raw=true)
 **(A)**	Grouped scatterplot of *AKT3* (Gene A2) expression versus cell viability in GSK2110183 relative to control (DMSO) treatment for the AKT1/AKT3 paralog pair. Overlaid box-and-whisker plots indicate group median, IQR, and outliers. WRST with Benjamini-Hochberg FDR correction was used to compare the median of low versus normal groups. 
 **(B)**	As in (A), but for AZD5363. 
-**(C)**	Grouped scatterplot of *AKT1* and *AKT3* expression across PRISM cell lines. Gene expression is measured as log2(TPM). Colors indicate the expression outlier group of each cell line: blue is low, gray is normal, red is high. 
+**(C)**	Grouped scatterplot of *AKT1* and *AKT3* expression across PRISM cell lines. Gene expression is measured as log<sub>2</sub>(TPM). Colors indicate the expression outlier group of each cell line: blue is low, gray is normal, red is high. 
 **(D)**	As in (A), but for *AKT2/AKT3*. 
 **(E)**	As in (B), but for *AKT2/AKT3*. 
 **(F)**	As in (C), but for *AKT2* and *AKT3*.
