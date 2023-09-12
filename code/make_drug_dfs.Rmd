@@ -1,7 +1,7 @@
 ---
 title: "make_drug_dfs"
 author: "Phoebe Parrish"
-date: "2022-01-07"
+date: "2023-09-10"
 output: html_document
 ---
 
@@ -31,18 +31,9 @@ library(ggprism) # another significance bar package...
 
 date <- Sys.Date()
 
-## work laptop
-base_dir <- file.path("/Users", "pparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
-                      "01_Data", "Paralog_SL_meta_analysis")
+in_dir <- file.path("..", "input_data")
 
-## personal laptop
-# base_dir <- file.path("/Users", "phoebeparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
-#                       "01_Data", "Paralog_SL_meta_analysis")
-
-in_dir <- file.path(base_dir, "01_input_files")
-
-out_dir <- file.path(base_dir, "02_output_files")
-
+out_dir <- file.path("..", "results/integrated_dfs")
 
 ```
 
@@ -53,9 +44,9 @@ out_dir <- file.path(base_dir, "02_output_files")
 
 d.DeKegel <- read_csv(file.path(in_dir, "DeKegel_Table_S8.csv"))
 
-d.Parrish <- read_rds(file.path(in_dir, "d.PC9_v_HeLa_paralog_target_GI_wide_flag"))
+# d.Parrish <- read_rds(file.path(in_dir, "d.PC9_v_HeLa_paralog_target_GI_wide_flag"))
 
-d.Dede <- read_tsv(file.path(in_dir, "Dede_Table_S2.txt"))
+# d.Dede <- read_tsv(file.path(in_dir, "Dede_Table_S2.txt"))
 
 
 d.Broad_drug_info <- read_csv(file.path(in_dir, "primary-screen-replicate-collapsed-treatment-info.csv"))
@@ -66,54 +57,8 @@ d.Broad_secondary_doses <- read_csv(file.path(in_dir, "secondary-screen-dose-res
 
 ```
 
-# Analysis
+# Integrate datasets
 
-## Get Ensembl IDs and merge
-
-```{r}
-
-d.DeKegel <- d.DeKegel %>%
-  unite(ensembl_pair, c(A1_ensembl, A2_ensembl), sep = "_", remove = FALSE) %>%
-  unite(entrez_pair, c(A1_entrez, A2_entrez), sep = "_", remove = FALSE)
-d.DeKegel
-
-d.Parrish <- d.Parrish %>%
-  rename(ensembl_pair_1 = ensembl_paralog_pair) %>%
-  unite(ensembl_pair_2, c(target2_ensembl_id, target1_ensembl_id), sep = "_", remove = FALSE)
-
-```
-
-```{r}
-
-d.Parrish_DeKegel_1 <- inner_join(d.Parrish, d.DeKegel, by = c("ensembl_pair_1" = "ensembl_pair"))
-d.Parrish_DeKegel_1
-
-d.Parrish_DeKegel_2 <- inner_join(d.Parrish, d.DeKegel, by = c("ensembl_pair_2" = "ensembl_pair"))
-d.Parrish_DeKegel_2
-
-d.Parrish_DeKegel <- bind_rows(d.Parrish_DeKegel_1, d.Parrish_DeKegel_2)
-d.Parrish_DeKegel
-
-```
-
-```{r}
-
-## get list of paralog pairs that are shared between pgPEN and De Kegel
-Parrish_DeKegel_ensembl_pairs <- d.Parrish_DeKegel %>%
-  dplyr::select(ensembl_pair_1, ensembl_pair_2) %>%
-  pivot_longer(c(ensembl_pair_1, ensembl_pair_2)) %>%
-  pull(value)
-# Parrish_DeKegel_ensembl_pairs
-
-## add a flag to indicate whether a given pair is included in pgPEN or not
-d.DeKegel <- d.DeKegel %>%
-  mutate(pgPEN_flag = ifelse(ensembl_pair %in% Parrish_DeKegel_ensembl_pairs, TRUE, FALSE)) 
-
-d.DeKegel %>%
-  group_by(pgPEN_flag) %>%
-  summarize(n = n())
-
-```
 
 ## DepMap drug data
 Also see: https://depmap.org/repurposing/
@@ -160,61 +105,17 @@ drug_metadata <- eh[["EH3086"]]
 
 
 
-```{r, include=FALSE}
 
-# drug_sensitivity
-# expr
-# 
-# ggplot(expr, aes(x = rna_expression)) +
-#   geom_histogram(binwidth = 0.5, color = "black", fill = "gray") +
-#   geom_vline(xintercept = 1.5, color = "red", linetype = "dashed") +
-#   theme_classic() + 
-#   theme(aspect.ratio = 0.75, 
-#         axis.text = element_text(color = "black"),
-#         axis.ticks = element_line(color = "black"))
-# # ggsave(file.path(out_dir, "depmap_rna_expr_allCellLines_allGenes.png"),
-# #        width = 4.5, height = 3)
-
-```
-
-
-```{r, include=FALSE}
-
-# copyNumber
-
-# cn
-# 
-# median(cn$log_copy_number, na.rm = TRUE)
-# 
-# # cn %>%
-# #   summarize(median_cn = median(log_copy_number))
-# 
-# ggplot(cn, aes(x = log_copy_number)) +
-#   geom_histogram(binwidth = 0.25, color = "black", fill = "gray") +
-#   # geom_vline(xintercept = 1.5, color = "red", linetype = "dashed") +
-#   theme_classic() +
-#   theme(aspect.ratio = 0.75,
-#         axis.text = element_text(color = "black"),
-#         axis.ticks = element_line(color = "black"))
-# # ggsave(file.path(out_dir, "depmap_cn_allCellLines_allGenes.png"),
-# #        width = 4.5, height = 3)
-
-```
-
-Expression (red line indicates TPM = 1.5): 
-![Histogram of RNA expression for all genes across all DepMap cell lines.](file.path(out_dir, "depmap_rna_expr_allCellLines_allGenes.png"))
-
-Copy number: 
-![Histogram of copy number for all genes across all DepMap cell lines.](file.path(out_dir, "depmap_cn_allCellLines_allGenes.png"))
-
-Cutoffs to apply: 
-* expression: >1.5 log2(TPM) = expressed
-* copy number: >1.5 log_copy_number = copy gain, < 0.5??? = copy loss
 
 ### Get gene list
 
 #### De Kegel top 5%
 ```{r}
+
+d.DeKegel <- d.DeKegel %>%
+  unite(ensembl_pair, c(A1_ensembl, A2_ensembl), sep = "_", remove = FALSE) %>%
+  unite(entrez_pair, c(A1_entrez, A2_entrez), sep = "_", remove = FALSE)
+d.DeKegel
 
 DeKegel_top5_genes_entrez <- d.DeKegel %>%
   filter(prediction_percentile < 5) %>%
@@ -236,13 +137,13 @@ DeKegel_top5_genes_hgnc <- d.DeKegel %>%
 
 # metadata
 # 
-# d.expr_DeKegel_top5 <- expr %>%
-#   dplyr::filter(entrez_id %in% DeKegel_top5_genes_entrez) 
-# d.expr_DeKegel_top5
-# 
-# d.cn_DeKegel_top5 <- cn %>%
-#   dplyr::filter(entrez_id %in% DeKegel_top5_genes_entrez)
-# d.cn_DeKegel_top5
+d.expr_DeKegel_top5 <- expr %>%
+  dplyr::filter(entrez_id %in% DeKegel_top5_genes_entrez)
+d.expr_DeKegel_top5
+
+d.cn_DeKegel_top5 <- cn %>%
+  dplyr::filter(entrez_id %in% DeKegel_top5_genes_entrez)
+d.cn_DeKegel_top5
 # 
 # d.mut_DeKegel_top5 <- mut_calls %>%
 #   dplyr::filter(entrez_id %in% DeKegel_top5_genes_entrez)
@@ -349,8 +250,7 @@ d.cn_top5 <- read_rds(file.path(out_dir, "d.cn_21Q2_DeKegel_top5"))
 d.DeKegel_top5 <- d.DeKegel %>%
   filter(prediction_percentile < 5) %>%
   rename(A1_hgnc = A1, A2_hgnc = A2) %>%
-  dplyr::select(prediction_rank:family_size,
-                pgPEN_flag)
+  dplyr::select(prediction_rank:family_size)
 d.DeKegel_top5
 
 d.DeKegel_top5_genes <- d.DeKegel_top5 %>%
@@ -483,7 +383,7 @@ d.DeKegel_top5_pairs_drug_sens
 
 
 ## keep only relevant columns from DepMap CN dataframe
-d.cn_tmp <- d.cn_top5 %>%
+d.cn_tmp <- d.cn_DeKegel_top5 %>%
   dplyr::select(depmap_id, entrez_id, log_copy_number) 
 
 ## convert entrez ID type to character
@@ -515,15 +415,15 @@ d.DeKegel_top5_pairs_drug_sens_cn
 ```{r}
 
 ## calculate combined CN for each pair
-d.DeKegel_top5_pairs_drug_sens_cn <- d.DeKegel_top5_pairs_drug_sens_cn %>%
-  mutate(combined_log_cn = log2((2^A1_log_cn) + (2^A2_log_cn))) 
-d.DeKegel_top5_pairs_drug_sens_cn
+# d.DeKegel_top5_pairs_drug_sens_cn <- d.DeKegel_top5_pairs_drug_sens_cn %>%
+#   mutate(combined_log_cn = log2((2^A1_log_cn) + (2^A2_log_cn))) 
+# d.DeKegel_top5_pairs_drug_sens_cn
 
 ## reorganize columns and save DF/RDS with all annotations
 d.DeKegel_top5_pairs_drug_sens_cn_annot <- d.DeKegel_top5_pairs_drug_sens_cn %>%
   dplyr::select(depmap_id, compound_id, sorted_gene_pair, dependency,
-                A1_log_cn:combined_log_cn, A1_hgnc:A2_ensembl, prediction_rank,
-                prediction_percentile, prediction_score:pgPEN_flag,
+                A1_log_cn:A2_log_cn, A1_hgnc:A2_ensembl, prediction_rank,
+                prediction_percentile, prediction_score:family_size,
                 broad_id:drug_targets, cell_line:lineage_subtype)
 d.DeKegel_top5_pairs_drug_sens_cn_annot
 
@@ -533,9 +433,9 @@ d.DeKegel_top5_pairs_drug_sens_cn_annot
 
 ## save CN output
 
-# write_rds(d.DeKegel_top5_pairs_drug_sens_cn_annot, 
+# write_rds(d.DeKegel_top5_pairs_drug_sens_cn_annot,
 #           file.path(out_dir, "d.DeKegel_top5_pairs_drug_sens_cn_annot"))
-# write_tsv(d.DeKegel_top5_pairs_drug_sens_cn_annot, 
+# write_tsv(d.DeKegel_top5_pairs_drug_sens_cn_annot,
 #           file.path(out_dir, "d.DeKegel_top5_pairs_drug_sens_cn_annot.txt"))
 
 ```
@@ -544,7 +444,7 @@ d.DeKegel_top5_pairs_drug_sens_cn_annot
 ```{r}
 
 ## keep only relevant columns from DepMap expression dataframe
-d.expr_tmp <- d.expr_top5 %>%
+d.expr_tmp <- d.expr_DeKegel_top5 %>%
   dplyr::select(depmap_id, entrez_id, rna_expression)
 
 ## convert entrez ID type to character
@@ -570,15 +470,15 @@ d.DeKegel_top5_pairs_drug_sens_expr
 ```{r}
 
 ## calculate combined expr for each pair
-d.DeKegel_top5_pairs_drug_sens_expr <- d.DeKegel_top5_pairs_drug_sens_expr %>%
-  mutate(combined_log_tpm = log2((2^A1_log_tpm) + (2^A2_log_tpm))) 
-d.DeKegel_top5_pairs_drug_sens_expr
+# d.DeKegel_top5_pairs_drug_sens_expr <- d.DeKegel_top5_pairs_drug_sens_expr %>%
+#   mutate(combined_log_tpm = log2((2^A1_log_tpm) + (2^A2_log_tpm))) 
+# d.DeKegel_top5_pairs_drug_sens_expr
 
 ## reorganize columns and save DF/RDS with all annotations
 d.DeKegel_top5_pairs_drug_sens_expr_annot <- d.DeKegel_top5_pairs_drug_sens_expr %>%
   dplyr::select(depmap_id, compound_id, sorted_gene_pair, dependency,
-                A1_log_tpm:combined_log_tpm, A1_hgnc:A2_ensembl, prediction_rank,
-                prediction_percentile, prediction_score:pgPEN_flag,
+                A1_log_tpm:A2_log_tpm, A1_hgnc:A2_ensembl, prediction_rank,
+                prediction_percentile, prediction_score:family_size,
                 broad_id:drug_targets, cell_line:lineage_subtype)
 d.DeKegel_top5_pairs_drug_sens_expr_annot
 
@@ -602,8 +502,7 @@ d.DeKegel_top5_pairs_drug_sens_expr_annot
 
 ```{r}
 
-## filtering join to get drug sensitivity data only for drugs targeting top 5% genes
-## also adds drug annotations
+## get druggability, expression, CN for all drug target genes (not just SL paralogs)
 
 d.Broad_drug_info
 drug_sensitivity
@@ -660,8 +559,8 @@ d.drug_sens_all_genes_expr
 
 ```{r}
 
-# write_rds(d.drug_sens_all_genes_cn, file.path(out_dir, "d.drug_sens_all_genes_cn"))
-# write_rds(d.drug_sens_all_genes_expr, file.path(out_dir, "d.drug_sens_all_genes_expr"))
+write_rds(d.drug_sens_all_genes_cn, file.path(out_dir, "d.drug_sens_all_genes_cn"))
+write_rds(d.drug_sens_all_genes_expr, file.path(out_dir, "d.drug_sens_all_genes_expr"))
 
 ```
 
@@ -671,6 +570,103 @@ d.drug_sens_all_genes_expr
 
 # Remove below?
 
+## Get Ensembl IDs and merge
+
+```{r}
+
+d.DeKegel <- d.DeKegel %>%
+  unite(ensembl_pair, c(A1_ensembl, A2_ensembl), sep = "_", remove = FALSE) %>%
+  unite(entrez_pair, c(A1_entrez, A2_entrez), sep = "_", remove = FALSE)
+d.DeKegel
+
+d.Parrish <- d.Parrish %>%
+  rename(ensembl_pair_1 = ensembl_paralog_pair) %>%
+  unite(ensembl_pair_2, c(target2_ensembl_id, target1_ensembl_id), sep = "_", remove = FALSE)
+
+```
+
+```{r}
+
+d.Parrish_DeKegel_1 <- inner_join(d.Parrish, d.DeKegel, by = c("ensembl_pair_1" = "ensembl_pair"))
+d.Parrish_DeKegel_1
+
+d.Parrish_DeKegel_2 <- inner_join(d.Parrish, d.DeKegel, by = c("ensembl_pair_2" = "ensembl_pair"))
+d.Parrish_DeKegel_2
+
+d.Parrish_DeKegel <- bind_rows(d.Parrish_DeKegel_1, d.Parrish_DeKegel_2)
+d.Parrish_DeKegel
+
+```
+
+```{r}
+
+## get list of paralog pairs that are shared between pgPEN and De Kegel
+Parrish_DeKegel_ensembl_pairs <- d.Parrish_DeKegel %>%
+  dplyr::select(ensembl_pair_1, ensembl_pair_2) %>%
+  pivot_longer(c(ensembl_pair_1, ensembl_pair_2)) %>%
+  pull(value)
+# Parrish_DeKegel_ensembl_pairs
+
+## add a flag to indicate whether a given pair is included in pgPEN or not
+d.DeKegel <- d.DeKegel %>%
+  mutate(pgPEN_flag = ifelse(ensembl_pair %in% Parrish_DeKegel_ensembl_pairs, TRUE, FALSE)) 
+
+d.DeKegel %>%
+  group_by(pgPEN_flag) %>%
+  summarize(n = n())
+
+```
+
+```{r, include=FALSE}
+
+# drug_sensitivity
+# expr
+# 
+# ggplot(expr, aes(x = rna_expression)) +
+#   geom_histogram(binwidth = 0.5, color = "black", fill = "gray") +
+#   geom_vline(xintercept = 1.5, color = "red", linetype = "dashed") +
+#   theme_classic() + 
+#   theme(aspect.ratio = 0.75, 
+#         axis.text = element_text(color = "black"),
+#         axis.ticks = element_line(color = "black"))
+# # ggsave(file.path(out_dir, "depmap_rna_expr_allCellLines_allGenes.png"),
+# #        width = 4.5, height = 3)
+
+```
+
+
+```{r, include=FALSE}
+
+# copyNumber
+
+# cn
+# 
+# median(cn$log_copy_number, na.rm = TRUE)
+# 
+# # cn %>%
+# #   summarize(median_cn = median(log_copy_number))
+# 
+# ggplot(cn, aes(x = log_copy_number)) +
+#   geom_histogram(binwidth = 0.25, color = "black", fill = "gray") +
+#   # geom_vline(xintercept = 1.5, color = "red", linetype = "dashed") +
+#   theme_classic() +
+#   theme(aspect.ratio = 0.75,
+#         axis.text = element_text(color = "black"),
+#         axis.ticks = element_line(color = "black"))
+# # ggsave(file.path(out_dir, "depmap_cn_allCellLines_allGenes.png"),
+# #        width = 4.5, height = 3)
+
+```
+
+Expression (red line indicates TPM = 1.5): 
+![Histogram of RNA expression for all genes across all DepMap cell lines.](file.path(out_dir, "depmap_rna_expr_allCellLines_allGenes.png"))
+
+Copy number: 
+![Histogram of copy number for all genes across all DepMap cell lines.](file.path(out_dir, "depmap_cn_allCellLines_allGenes.png"))
+
+Cutoffs to apply: 
+* expression: >1.5 log2(TPM) = expressed
+* copy number: >1.5 log_copy_number = copy gain, < 0.5??? = copy loss
 
 ```{r}
 
