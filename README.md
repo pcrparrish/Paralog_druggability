@@ -1,4 +1,5 @@
 # Paralog_druggability
+Please visit the following [link](https://pcrparrish.github.io/Paralog_druggability/) to see the output from the Rmarkdown files hosted in this GitHub repo. For more information about the project and a summary of key results, see below. 
 
 ## Background
 Paralog synthetic lethal therapies are an attractive option for cancer treatment. Synthetic lethal therapies have the potential to target cancer cells more specifically with fewer off-target effects than oncogene-targeted therapies, and paralogs (AKA duplicated genes) show relatively high rates of synthetic lethality in human cancer cells ([ref1](https://www.sciencedirect.com/science/article/pii/S2211124721010354), [ref2](https://link.springer.com/article/10.1186/s13059-020-02173-2), [ref3](https://www.nature.com/articles/s41587-020-0437-z), [ref4](https://www.nature.com/articles/s41467-021-21478-9)). For more information on paralog synthetic lethal therapies, see [this recent review](https://www.cell.com/trends/cancer/fulltext/S2405-8033(23)00022-5). 
