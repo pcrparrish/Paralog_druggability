@@ -1,0 +1,654 @@
+---
+title: "test_cases"
+author: "Phoebe Parrish"
+date: "9/15/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(ggrepel)
+library(ggforce)
+library(ggsignif)
+library(RColorBrewer)
+library(ggpubr) # another way to do significance bars
+library(ggprism) # another significance bar package...
+
+```
+
+### Test analyses
+###### CDK4/6 test case
+```{r}
+
+# d.Broad_drug_info %>%
+#   dplyr::filter(grepl("CDK4", target))
+# 
+# d.Broad_drug_info
+# 
+# d.Broad_drug_info %>%
+#   dplyr::filter(grepl(str_c(top5_druggable_genes_hgnc, collapse = "|"), target))
+# 
+# drug_list <- d.Broad_drug_info %>%
+#   dplyr::filter(grepl(str_c(top5_druggable_genes_hgnc, collapse = "|"), target)) %>%
+#   distinct(column_name) %>%
+#   dplyr::pull(column_name)
+# 
+# drug_list
+# 
+# # str_c(top5_druggable_genes_hgnc, collapse = "|")
+# 
+# # drug_sensitivity
+# 
+# d.drug_sens_filtered <- drug_sensitivity %>%
+#   dplyr::filter(compound %in% drug_list) %>%
+#   left_join(d.Broad_drug_info, by = c("compound" = "column_name"))
+# d.drug_sens_filtered
+
+```
+
+```{r}
+
+## test case
+d.drug_sens_filtered %>%
+  filter(grepl("CDK4", target))
+
+d.drug_CDK4 <- d.drug_sens_filtered %>%
+  filter(grepl("CDK4", target))
+
+d.drug_CDK6 <- d.drug_sens_filtered %>%
+  filter(grepl("CDK6", target))
+
+d.expr_top5_drug %>%
+  filter(gene_name == "CDK4" | gene_name == "CDK6") %>%
+  ggplot(aes(x = rna_expression, fill = gene_name)) +
+  geom_histogram(binwidth = 0.5, color = "black", alpha = 0.75)+
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") + 
+  facet_wrap(~gene_name)
+
+d.expr_CDK4 <- d.expr_top5_drug %>%
+  filter(gene_name == "CDK4") %>%
+  group_by(gene_name) %>%
+  mutate(bin_tpm = ntile(rna_expression, 4)) %>%
+  mutate(bin_tpm = factor(bin_tpm, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+d.expr_CDK4
+
+d.expr_CDK6 <- d.expr_top5_drug %>%
+  filter(gene_name == "CDK6") %>%
+  group_by(gene_name) %>%
+  mutate(bin_tpm = ntile(rna_expression, 4)) %>%
+  mutate(bin_tpm = factor(bin_tpm, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+d.expr_CDK6
+
+d.CDK4_expr_CDK6_drug <- left_join(d.expr_CDK4, d.drug_CDK6, by = "depmap_id") %>%
+  filter(!is.na(compound))
+d.CDK4_expr_CDK6_drug
+
+d.CDK6_expr_CDK4_drug <- left_join(d.expr_CDK6, d.drug_CDK4, by = "depmap_id") %>%
+  filter(!is.na(compound))
+d.CDK6_expr_CDK4_drug
+
+# d.cn_top5_drug %>%
+#   filter(gene_name == "CDK4" | gene_name == "CDK6") %>%
+#   ggplot(aes(x = log_copy_number)) +
+#   geom_histogram()
+
+```
+
+
+
+```{r}
+
+## CDK4 expression vs. drugs targeting CDK6
+
+d.CDK4_expr_CDK6_drug
+ggplot(d.CDK4_expr_CDK6_drug, aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.CDK4_expr_CDK6_drug %>%
+  filter(grepl("BREAST", cell_line.x)) %>%
+  ggplot(aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.CDK4_expr_CDK6_drug %>%
+  filter(bin_tpm %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+d.CDK4_expr_CDK6_drug %>%
+  group_by(bin_tpm) %>%
+  filter(!is.na(dependency)) %>%
+  summarize(median = median(rna_expression))
+
+```
+
+
+```{r}
+
+## CDK6 expression vs. drugs targeting CDK4
+
+d.CDK6_expr_CDK4_drug
+ggplot(d.CDK6_expr_CDK4_drug, aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.CDK6_expr_CDK4_drug %>%
+  filter(bin_tpm %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+
+d.CDK6_expr_CDK4_drug %>%
+  filter(grepl("BREAST", cell_line.x)) %>%
+  ggplot(aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+# d.CDK6_expr_CDK4_drug %>%
+#   filter(grepl("BREAST", cell_line.x)) %>%
+#   filter(bin_tpm %in% c(1, 4)) %>%
+#   group_by(name) %>%
+#   summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+d.CDK6_expr_CDK4_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  ggplot(aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+```
+
+```{r}
+
+d.cn_top5_drug %>%
+  filter(gene_name == "CDK4" | gene_name == "CDK6") %>%
+  ggplot(aes(x = log_copy_number, fill = gene_name)) +
+  geom_histogram(binwidth = 0.25, color = "black", alpha = 0.75)+
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") + 
+  facet_wrap(~gene_name)
+
+d.cn_CDK4 <- d.cn_top5_drug %>%
+  filter(gene_name == "CDK4") %>%
+  group_by(gene_name) %>%
+  mutate(bin_cn = ntile(log_copy_number, 4)) %>%
+  mutate(bin_cn = factor(bin_cn, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+d.cn_CDK4
+
+d.cn_CDK6 <- d.cn_top5_drug %>%
+  filter(gene_name == "CDK6") %>%
+  group_by(gene_name) %>%
+  mutate(bin_cn = ntile(log_copy_number, 4)) %>%
+  mutate(bin_cn = factor(bin_cn, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+d.cn_CDK6
+
+d.CDK4_cn_CDK6_drug <- left_join(d.cn_CDK4, d.drug_CDK6, by = "depmap_id") %>%
+  filter(!is.na(compound))
+d.CDK4_cn_CDK6_drug
+
+d.CDK6_cn_CDK4_drug <- left_join(d.cn_CDK6, d.drug_CDK4, by = "depmap_id") %>%
+  filter(!is.na(compound))
+d.CDK6_cn_CDK4_drug
+
+```
+
+```{r}
+
+d.CDK4_cn_CDK6_drug
+ggplot(d.CDK4_cn_CDK6_drug, aes(x = bin_cn, y = dependency, fill = bin_cn)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.CDK4_cn_CDK6_drug %>%
+  filter(grepl("BREAST", cell_line.x)) %>%
+  ggplot(aes(x = bin_cn, y = dependency, fill = bin_cn)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.CDK4_cn_CDK6_drug %>%
+  filter(bin_cn %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_cn, alternative = "greater")$p.value)
+
+d.CDK4_cn_CDK6_drug %>%
+  group_by(bin_cn) %>%
+  filter(!is.na(dependency)) %>%
+  summarize(median = median(log_copy_number))
+
+d.CDK6_cn_CDK4_drug
+ggplot(d.CDK6_cn_CDK4_drug, aes(x = bin_cn, y = dependency, fill = bin_cn)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.CDK6_cn_CDK4_drug %>%
+  filter(grepl("BREAST", cell_line.x)) %>%
+  ggplot(aes(x = bin_cn, y = dependency, fill = bin_cn)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.CDK6_cn_CDK4_drug %>%
+  filter(grepl("BREAST", cell_line.x))%>%
+  filter(bin_cn %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_cn, alternative = "greater")$p.value)
+
+
+```
+
+###### Lung test cases
+```{r}
+
+d.drug_sens_filtered %>%
+  filter(grepl("lung", indication)) %>%
+  dplyr::select(compound,name:phase) %>%
+  distinct(compound, .keep_all = TRUE)
+
+```
+
+```{r}
+
+## RRM2, RRM2B w/ gemcitabine (targets RRM2)
+gene1 <- "RRM2"
+gene2 <- "RRM2B"
+d.cn_top5_drug %>%
+  filter(gene_name == gene1 | gene_name == gene2) %>%
+  ggplot(aes(x = log_copy_number, fill = gene_name)) +
+  geom_histogram(binwidth = 0.1, color = "black", alpha = 0.75)+
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") + 
+  facet_wrap(~gene_name)
+
+d.expr_top5_drug %>%
+  filter(gene_name == gene1 | gene_name == gene2) %>%
+  ggplot(aes(x = rna_expression, fill = gene_name)) +
+  geom_histogram(binwidth = 0.5, color = "black", alpha = 0.75)+
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") + 
+  facet_wrap(~gene_name)
+
+# d.drug_gene1 <- d.drug_sens_filtered %>%
+#   filter(grepl(gene1, target))
+# d.drug_gene1
+
+# d.drug_gene2 <- d.drug_sens_filtered %>%
+#   filter(grepl(gene2, target))
+# d.drug_gene2
+
+d.drug_gene1 <- d.drug_sens_filtered %>%
+  filter(name == "gemcitabine")
+
+d.expr_gene1 <- d.expr_top5_drug %>%
+  filter(gene_name == gene1) %>%
+  group_by(gene_name) %>%
+  mutate(bin_tpm = ntile(rna_expression, 4)) %>%
+  mutate(bin_tpm = factor(bin_tpm, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+
+d.expr_gene2 <- d.expr_top5_drug %>%
+  filter(gene_name == gene2) %>%
+  group_by(gene_name) %>%
+  mutate(bin_tpm = ntile(rna_expression, 4)) %>%
+  mutate(bin_tpm = factor(bin_tpm, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+
+# d.gene1_expr_gene2_drug <- left_join(d.expr_gene1, d.drug_gene2, by = "depmap_id") %>%
+#   filter(!is.na(compound))
+
+d.gene2_expr_gene1_drug <- left_join(d.expr_gene2, d.drug_gene1, by = "depmap_id") %>%
+  filter(!is.na(compound))
+
+ggplot(d.gene2_expr_gene1_drug, aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene2_expr_gene1_drug %>%
+  filter(bin_tpm %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+d.gene2_expr_gene1_drug_lung <- d.expr_top5_drug %>%
+  filter(grepl("LUNG", cell_line)) %>%
+  filter(gene_name == gene2) %>%
+  group_by(gene_name) %>%
+  mutate(bin_tpm = ntile(rna_expression, 4)) %>%
+  mutate(bin_tpm = factor(bin_tpm, levels = c(4, 3, 2, 1))) %>%
+  ungroup() %>%
+  left_join(d.drug_gene1, by = "depmap_id") %>%
+  filter(!is.na(compound))
+
+d.expr_top5_drug
+
+d.gene2_expr_gene1_drug_lung %>%
+  ggplot(aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene2_expr_gene1_drug_lung %>%
+  filter(bin_tpm %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+```
+
+
+```{r}
+
+
+## TUBB, TUBB1 and vindesine (targets both genes)
+gene1 <- "TUBB"
+gene2 <- "TUBB1"
+d.cn_top5_drug %>%
+  filter(gene_name == gene1 | gene_name == gene2) %>%
+  ggplot(aes(x = log_copy_number, fill = gene_name)) +
+  geom_histogram(binwidth = 0.1, color = "black", alpha = 0.75)+
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") + 
+  facet_wrap(~gene_name)
+
+d.expr_top5_drug %>%
+  filter(gene_name == gene1 | gene_name == gene2) %>%
+  ggplot(aes(x = rna_expression, fill = gene_name)) +
+  geom_histogram(binwidth = 0.5, color = "black", alpha = 0.75)+
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") + 
+  facet_wrap(~gene_name)
+
+d.drug_gene1 <- d.drug_sens_filtered %>%
+  filter(name == "vindesine")
+
+d.drug_gene2 <- d.drug_sens_filtered %>%
+  filter(name == "vindesine")
+
+d.expr_gene1 <- d.expr_top5_drug %>%
+  filter(gene_name == gene1) %>%
+  group_by(gene_name) %>%
+  mutate(bin_tpm = ntile(rna_expression, 4)) %>%
+  mutate(bin_tpm = factor(bin_tpm, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+
+d.expr_gene2 <- d.expr_top5_drug %>%
+  filter(gene_name == gene2) %>%
+  group_by(gene_name) %>%
+  mutate(bin_tpm = ntile(rna_expression, 4)) %>%
+  mutate(bin_tpm = factor(bin_tpm, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+
+d.gene1_expr_gene2_drug <- left_join(d.expr_gene1, d.drug_gene2, by = "depmap_id") %>%
+  filter(!is.na(compound))
+
+d.gene2_expr_gene1_drug <- left_join(d.expr_gene2, d.drug_gene1, by = "depmap_id") %>%
+  filter(!is.na(compound))
+
+## TUBB1 expr, TUBB dependency
+ggplot(d.gene2_expr_gene1_drug, aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene2_expr_gene1_drug %>%
+  filter(bin_tpm %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+
+d.gene2_expr_gene1_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  ggplot(aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene2_expr_gene1_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  filter(bin_tpm %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+## TUBB expr, TUBB1 dependency
+ggplot(d.gene1_expr_gene2_drug, aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene1_expr_gene2_drug %>%
+  filter(bin_tpm %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+
+d.gene1_expr_gene2_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  ggplot(aes(x = bin_tpm, y = dependency, fill = bin_tpm)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene1_expr_gene2_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  filter(bin_tpm %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_tpm, alternative = "greater")$p.value)
+
+```
+
+```{r}
+
+## TOP2A, TOP2B and etoposide (targets both genes)
+gene1 <- "TOP2A"
+gene2 <- "TOP2B"
+d.cn_top5_drug %>%
+  filter(gene_name == gene1 | gene_name == gene2) %>%
+  ggplot(aes(x = log_copy_number, fill = gene_name)) +
+  geom_histogram(binwidth = 0.1, color = "black", alpha = 0.75)+
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") + 
+  facet_wrap(~gene_name)
+
+d.expr_top5_drug %>%
+  filter(gene_name == gene1 | gene_name == gene2) %>%
+  ggplot(aes(x = rna_expression, fill = gene_name)) +
+  geom_histogram(binwidth = 0.5, color = "black", alpha = 0.75)+
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") + 
+  facet_wrap(~gene_name)
+
+d.drug_gene1 <- d.drug_sens_filtered %>%
+  filter(name == "etoposide")
+
+d.drug_gene2 <- d.drug_sens_filtered %>%
+  filter(name == "etoposide")
+
+d.cn_gene1 <- d.cn_top5_drug %>%
+  filter(gene_name == gene1) %>%
+  group_by(gene_name) %>%
+  mutate(bin_cn = ntile(log_copy_number, 4)) %>%
+  mutate(bin_cn = factor(bin_cn, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+
+d.cn_gene2 <- d.cn_top5_drug %>%
+  filter(gene_name == gene2) %>%
+  group_by(gene_name) %>%
+  mutate(bin_cn = ntile(log_copy_number, 4)) %>%
+  mutate(bin_cn = factor(bin_cn, levels = c(4, 3, 2, 1))) %>%
+  ungroup()
+
+d.gene1_cn_gene2_drug <- left_join(d.cn_gene1, d.drug_gene2, by = "depmap_id") %>%
+  filter(!is.na(compound))
+
+d.gene2_cn_gene1_drug <- left_join(d.cn_gene2, d.drug_gene1, by = "depmap_id") %>%
+  filter(!is.na(compound))
+
+## TOP2A cn, TOP2B dependency
+ggplot(d.gene2_cn_gene1_drug, aes(x = bin_cn, y = dependency, fill = bin_cn)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene2_cn_gene1_drug %>%
+  filter(bin_cn %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_cn, alternative = "greater")$p.value)
+
+
+d.gene2_cn_gene1_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  ggplot(aes(x = bin_cn, y = dependency, fill = bin_cn)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene2_cn_gene1_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  filter(bin_cn %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_cn, alternative = "greater")$p.value)
+
+## TOP2B cn, TOP2A dependency
+ggplot(d.gene1_cn_gene2_drug, aes(x = bin_cn, y = dependency, fill = bin_cn)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene1_cn_gene2_drug %>%
+  filter(bin_cn %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_cn, alternative = "greater")$p.value)
+
+
+d.gene1_cn_gene2_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  ggplot(aes(x = bin_cn, y = dependency, fill = bin_cn)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 0.75,
+        axis.text = element_text(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  facet_wrap(~name, scales = "free_y")
+
+d.gene1_cn_gene2_drug %>%
+  filter(grepl("LUNG", cell_line.x)) %>%
+  filter(bin_cn %in% c(1, 4)) %>%
+  group_by(name) %>%
+  summarize("pval_1_v_4" = wilcox.test(dependency ~ bin_cn, alternative = "greater")$p.value)
+
+d.gene1_cn_gene2_drug %>%
+  group_by(bin_cn) %>%
+  summarize("median_group_cn" = median(log_copy_number))
+
+```
+
