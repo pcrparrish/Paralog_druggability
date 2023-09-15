@@ -6,9 +6,8 @@ output: html_document
 ---
 
 # To Do
-* get rid of all_genes code for everything except EGFR inhibitors and other known examples
-* update the renv lock file
-
+* update depmap version - use more recent data (I am currently using 19Q1)
+* CN as continuous variable, look at outliers (not top 2 quartiles)
 
 # Setup
 
@@ -27,7 +26,6 @@ library(ggprism) # another significance bar package...
 library(scales) # scientific notation
 library(ggtext) # for using superscript in labels
 library(DescTools) # for robust scaling
-library(kableExtra)
 
 ```
 
@@ -37,9 +35,18 @@ library(kableExtra)
 
 date <- Sys.Date()
 
-in_dir <- file.path("..", "results/integrated_dfs")
+## work laptop
+base_dir <- file.path("/Users", "pparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
+                      "01_Data", "Paralog_SL_meta_analysis")
 
-out_dir <- file.path("..", "results/expression_output")
+## personal laptop
+# base_dir <- file.path("/Users", "phoebeparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
+#                       "01_Data", "Paralog_SL_meta_analysis")
+
+in_dir <- file.path(base_dir, "01_input_files")
+
+out_dir <- file.path(base_dir, "02_output_files")
+
 
 ```
 
@@ -48,13 +55,15 @@ out_dir <- file.path("..", "results/expression_output")
 
 ```{r, message = FALSE}
 
-d.DeKegel_top5_pairs_drug_sens_expr_annot <- read_rds(file.path(in_dir, "d.DeKegel_top5_pairs_drug_sens_expr_annot"))
+d.DeKegel_top5_pairs_drug_sens_expr_annot <- read_rds(file.path(out_dir, "d.DeKegel_top5_pairs_drug_sens_expr_annot"))
 
-d.drug_sens_all_genes_expr <- read_rds(file.path(in_dir, "d.drug_sens_all_genes_expr"))
+d.Broad_drug_info <- read_csv(file.path(in_dir, "primary-screen-replicate-collapsed-treatment-info.csv"))
 
-# d.Broad_drug_info <- read_csv(file.path(in_dir, "primary-screen-replicate-collapsed-treatment-info.csv"))
-# d.Broad_secondary_auc <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
-# d.Broad_secondary_doses <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
+d.Broad_secondary_auc <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
+
+d.Broad_secondary_doses <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
+
+d.drug_sens_all_genes_expr <- read_rds(file.path(out_dir, "d.drug_sens_all_genes_expr"))
 
 ```
 
@@ -66,151 +75,92 @@ d.DeKegel_top5_pairs_drug_sens_expr <- d.DeKegel_top5_pairs_drug_sens_expr_annot
   dplyr::select(-c(entrez_pair:prediction_rank, prediction_score:family_size,
                    broad_id, primary_disease, subtype_disease))
 
+
 d.drug_sens_all_genes_expr <- d.drug_sens_all_genes_expr %>%
   rename(log_tpm = rna_expression)
 
-## how many gene pairs are included in the paralog dataset?
+d.DeKegel_top5_pairs_drug_sens_expr
 d.DeKegel_top5_pairs_drug_sens_expr %>%
   distinct(sorted_gene_pair) %>%
   nrow()
 
 ```
 
-### Import functions
+### Useful functions
 
 #### Stats
 ```{r}
 
-source("shared_functions.R")
+## adjust p-values
+BH_adjust <- function(df){
+  
+  d.p_vals <- df %>%
+  arrange(p_val) %>%
+  dplyr::select(target, compound_id, p_val) 
+
+  p_vals <- d.p_vals %>%
+    arrange(p_val) %>%
+    dplyr::select(p_val) %>%
+    pull()
+  
+  fdr_vals <- p.adjust(p_vals, method = "BH")
+
+  d.fdr_vals <- tibble(fdr = fdr_vals)
+  
+  d.stats <- d.p_vals %>%
+    add_column(d.fdr_vals)
+  d.stats
+  
+  return(d.stats)
+  
+}
+
 
 ```
-
-
-# Analysis
-
-## Single-gene
-
-This analysis is intended to demonstrate expected results for targeted inhibitors and their target (single) genes. 
-
-### PRISM Phase 1 drug sensitivity
-
-#### Continuous/linear regression
-
-```{r}
-
-## running lm for each sorted_gene_pair/compound_id group
-
-## use broom::glance to get rsquared and pval
-d.drug_sens_all_genes_expr_lm_summary <- d.drug_sens_all_genes_expr %>%
-  filter(!is.na(dependency)) %>%
-  filter(!is.na(log_tpm)) %>%
-  group_by(target, compound_id) %>%
-  group_modify(~ broom::glance(lm(dependency ~ log_tpm, data = .x))) %>%
-  dplyr::ungroup() %>%
-  rename(r_squared = r.squared, p_val = p.value)
-# d.drug_sens_all_genes_expr_lm_summary
-
-## FDR-adjust p-vals for multiple testing and add back to summary DF
-d.stats <- BH_adjust(d.drug_sens_all_genes_expr_lm_summary)
-# d.stats
-
-d.drug_sens_all_genes_expr_lm_summary <- d.stats %>%
-  dplyr::select(-p_val) %>%
-  right_join(d.drug_sens_all_genes_expr_lm_summary, by = c("target", "compound_id")) %>%
-  dplyr::select(target, compound_id, r_squared, p_val, fdr)
-# d.drug_sens_all_genes_expr_lm_summary
-
-## use broom::tidy to get slope
-d.drug_sens_all_genes_expr_lm_slope <- d.drug_sens_all_genes_expr %>%
-  filter(!is.na(dependency)) %>%
-  filter(!is.na(log_tpm)) %>%
-  group_by(target, compound_id) %>%
-  group_modify(~ broom::tidy(lm(dependency ~ log_tpm, data = .x))) %>%
-  dplyr::ungroup() %>%
-  ## extract slope of lm fit line from output
-  filter(term == "log_tpm") %>%
-  rename(slope = estimate) %>%
-  dplyr::select(target, compound_id, slope) 
-# d.drug_sens_all_genes_expr_lm_slope
-
-## add rsquared, p-val, fdr, and slope info to main DF
-d.drug_sens_all_genes_expr_lm <- d.drug_sens_all_genes_expr %>%
-  left_join(d.drug_sens_all_genes_expr_lm_summary, by = c("target", "compound_id")) %>%
-  left_join(d.drug_sens_all_genes_expr_lm_slope, by = c("target", "compound_id")) %>%
-  filter(!is.na(dependency)) %>%
-  filter(!is.na(log_tpm))
-
-summarize_stats(d.drug_sens_all_genes_expr_lm)
-
-```
-It's definitely redundant to run the lm twice but I can't figure out how to get it to work otherwise, because group_modify expects a DF output. 
-
 
 
 ```{r}
 
-## number of pairs with negative vs. positive slope
-d.drug_sens_all_genes_expr_lm %>%
-  distinct(target, compound_id, .keep_all = TRUE) %>%
-  mutate(slope_flag = ifelse(slope < 0, "negative", "positive")) %>%
-  group_by(slope_flag) %>%
-  summarize(n = n())
-
-## get low expression = low LFC pairs (positive slope)
-d.drug_sens_all_genes_expr_lm_pos_slope <-d.drug_sens_all_genes_expr_lm %>%
-  filter(slope > 0)
-
-## get high expression = low LFC pairs (negative slope)
-d.drug_sens_all_genes_expr_lm_neg_slope <- d.drug_sens_all_genes_expr_lm %>%
-  filter(slope < 0)
-
-## summarize significant drug/gene combos for each new DF
-summarize_stats(d.drug_sens_all_genes_expr_lm_pos_slope)
-summarize_stats(d.drug_sens_all_genes_expr_lm_neg_slope)
+## summarize stats output
+summarize_stats <- function(df){
+  df_new <- df %>%
+    distinct(target, compound_id, .keep_all = TRUE)
+  
+  n_p_L0.05 <- df_new %>%
+    filter(p_val < 0.05) %>%
+    nrow()
+  
+  n_p_L0.01 <- df_new %>%
+    filter(p_val < 0.01) %>%
+    nrow()
+  
+  n_fdr_L0.05 <- df_new %>%
+    filter(fdr < 0.05) %>%
+    nrow()
+  
+  n_fdr_L0.1 <- df_new %>%
+    filter(fdr < 0.1) %>%
+    nrow()
+  
+  cat(paste("df:", deparse(substitute(df)), "\n", sep = " "))
+  cat("# target/compound pairs with\n")
+  cat(paste("p < 0.05:", n_p_L0.05, "\n", sep = " "))
+  cat(paste("p < 0.01:", n_p_L0.01, "\n", sep = " "))
+  cat(paste("FDR < 0.1:", n_fdr_L0.1, "\n", sep = " "))
+  cat(paste("FDR < 0.05:", n_fdr_L0.05, "\n\n", sep = " "))
+  
+}
 
 ```
 
-##### Plot
-###### example genes
-```{r}
+#### Plots
 
-plot_list <- d.drug_sens_all_genes_expr_lm_pos_slope %>%
-  unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
-  filter(fdr < 0.05) %>%
-  mutate("target_compound_label" = reorder(target_compound_label, fdr),
-         "target" = reorder(target, fdr)) %>%
-  arrange(fdr) %>%
-  distinct(target_compound_label) %>%
-  head(10) %>%
-  pull()
+For deparsing variables to use in dplyr: https://cran.r-project.org/web/packages/dplyr/vignettes/programming.html
 
-d.plot <- d.drug_sens_all_genes_expr_lm_pos_slope %>%
-  unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
-  filter(target_compound_label %in% plot_list) 
 
-ggplot(d.plot, aes(x= log_tpm, y = dependency)) +
-      geom_point(size = 1) +
-      geom_smooth(method = lm, se = FALSE, color = "gray60") +
-      # geom_richtext(data = d.label,
-      #               aes(x = group_label_x, y = group_label_y,
-      #               ## this package can do HTML-formatting for text
-      #               label = paste0("r<sup>2</sup>=", r_squared, "<br>", 
-      #                              toupper(stat_name), "=", {{col_name}})),
-      #               ## adjust label alignment and remove borders
-      #               hjust = 0, vjust = 1, label.color = NA, size = 3,
-      #               ## label background = transparent, text is not
-      #               fill = alpha(c("white"), 0.75),
-      #               label.margin = unit(c(0, 0, 0, 0), "lines"),
-      #               label.padding = unit(c(0, 0, 0, 0), "lines")) +
-      # labs(x = x_title, y = y_title) +
-      theme_bw() +
-      theme(aspect.ratio = 1,
-            axis.text = element_text(color = "black"),
-            axis.ticks = element_line(color = "black")) +
-      facet_wrap_paginate(~target_compound_label)
-```
+##### lm analysis
 
-###### all genes
+###### single genes
 ```{r}
 
 make_lm_plot <- function(df, x_var, x_title, y_var, y_title, col_name, stat_cutoff, plot_n){
@@ -305,49 +255,6 @@ make_lm_plot <- function(df, x_var, x_title, y_var, y_title, col_name, stat_cuto
 
 ```
 
-
-
-```{r}
-
-## run make_lm_plot function
-
-# make_lm_plot(d.drug_sens_all_genes_expr_lm_pos_slope, 
-#              "log_tpm", "log2(TPM)",
-#              "dependency", "LFC_treated_vs_DMSO",
-#              fdr, 0.1, 50)
-# 
-# make_lm_plot(d.drug_sens_all_genes_expr_lm_neg_slope, 
-#              "log_tpm", "log2(TPM)",
-#              "dependency", "LFC_treated_vs_DMSO", 
-#              fdr, 0.1, 50)
-
-```
-
-
-```{r}
-
-d.drug_sens_all_genes_expr_lm_pos_slope_fdr_L0.1 <- d.drug_sens_all_genes_expr_lm_pos_slope %>% 
-  filter(fdr < 0.1) %>%
-  arrange(fdr) %>%
-  distinct(target, compound_id, .keep_all = TRUE) %>%
-  dplyr::select(target, compound_name, slope, r_squared:fdr, moa)
-print_kbl(head(d.drug_sens_all_genes_expr_lm_pos_slope_fdr_L0.1))
-
-# write_tsv(d.drug_sens_all_genes_expr_lm_pos_slope_fdr_L0.1,
-#           file.path(out_dir, "d.drug_sens_all_genes_expr_lm_pos_slope_fdr_L0.1.txt"))
-
-d.drug_sens_all_genes_expr_lm_neg_slope_fdr_L0.1 <- d.drug_sens_all_genes_expr_lm_neg_slope %>% 
-  filter(fdr < 0.1) %>%
-  arrange(fdr) %>%
-  distinct(target, compound_id, .keep_all = TRUE) %>%
-  dplyr::select(target, compound_name, slope, r_squared:fdr, moa)
-print_kbl(head(d.drug_sens_all_genes_expr_lm_neg_slope_fdr_L0.1))
-
-# write_tsv(d.drug_sens_all_genes_expr_lm_neg_slope_fdr_L0.1, 
-#           file.path(out_dir, "d.drug_sens_all_genes_expr_lm_neg_slope_fdr_L0.1.txt"))
-
-```
-
 ```{r}
 
 make_lm_lineage_plot <- function(df, x_var, x_title, y_var, y_title, col_name, stat_cutoff, plot_n){
@@ -419,969 +326,7 @@ make_lm_lineage_plot <- function(df, x_var, x_title, y_var, y_title, col_name, s
 
 ```
 
-
-```{r}
-
-# make_lm_lineage_plot(d.drug_sens_all_genes_expr_lm_pos_slope, 
-#                      "lineage", "Lineage",
-#                      "log_tpm", "log2(TPM)",
-#                      fdr, 0.1, 50)
-# 
-# make_lm_lineage_plot(d.drug_sens_all_genes_expr_lm_neg_slope,  
-#                      "lineage", "Lineage",
-#                      "log_tpm", "log2(TPM)",
-#                      fdr, 0.1, 50)
-
-```
-
-
-
-
-
-#### Z-scaled outliers
-
-```{r}
-
-## robustly scale expression data
-d.drug_sens_all_genes_expr_outlier <- d.drug_sens_all_genes_expr %>%
-  filter(!is.na(log_tpm)) %>%
-  filter(!is.na(dependency)) %>%
-  group_by(target, compound_id) %>% # is this correct?
-  mutate(scaled_log_tpm = RobScale(log_tpm, center = TRUE, scale = TRUE)) %>%
-  mutate(expr_outlier_flag = case_when(
-    scaled_log_tpm < -2 ~ "low",
-    scaled_log_tpm > 2 ~ "high", 
-    TRUE ~ "neither")) %>%
-  mutate(expr_low_flag = case_when(
-    scaled_log_tpm < -2 ~ TRUE,
-    TRUE ~ FALSE)) %>% ## if CN ≥ -2, classify as "not low"
-  ungroup()
-
-d.drug_sens_all_genes_expr_outlier %>%
-  group_by(expr_outlier_flag) %>%
-  summarize(n = n())
-
-d.drug_sens_all_genes_expr_outlier %>%
-  group_by(expr_low_flag) %>%
-  summarize(n = n())
-
-d.drug_sens_all_genes_expr_outlier %>%
-  group_by(target, compound_id) %>%
-  distinct(expr_low_flag) %>%
-  summarize(n = n()) %>%
-  filter(n < 2)
-
-```
-
-
-```{r}
-
-## calculate the WRST p-value for low-CN vs. not low-CN cell lines
-d.drug_sens_all_genes_expr_outlier_wrst_summary <- d.drug_sens_all_genes_expr_outlier %>%
-  group_by(target, compound_id) %>%
-  filter(any(expr_low_flag == TRUE)) %>% ## keep only groups where >1 cell line has low CN
-  summarize("p_val" = wilcox.test(dependency ~ expr_low_flag)$p.value)
-# d.drug_sens_all_genes_expr_outlier_wrst_summary
-
-d.stats <- BH_adjust(d.drug_sens_all_genes_expr_outlier_wrst_summary)
-
-d.drug_sens_all_genes_expr_outlier_wrst_summary <- d.drug_sens_all_genes_expr_outlier_wrst_summary %>%
-  dplyr::select(-p_val) %>%
-  left_join(d.stats, by = c("target", "compound_id"))
-
-
-
-## add p-values and FDR to main DF
-d.drug_sens_all_genes_expr_outlier_wrst <- left_join(d.drug_sens_all_genes_expr_outlier,
-                                                   d.drug_sens_all_genes_expr_outlier_wrst_summary,
-                                                   by = c("target", "compound_id")) %>%
-  ungroup()
-# d.drug_sens_all_genes_expr_outlier_wrst
-
-summarize_stats(d.drug_sens_all_genes_expr_outlier_wrst)
-
-```
-
-
-##### Plot
-# TO DO
-Plot just top ~5 or so genes
-```{r}
-
-d.plot <- d.drug_sens_all_genes_expr_outlier_wrst %>% 
-  ungroup() %>%
-  filter(fdr < 0.1) %>%
-  unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
-  mutate("target_compound_label" = reorder(target_compound_label, fdr),
-         "target" = reorder(target, fdr)) %>%
-  mutate(expr_low_flag = factor(expr_low_flag, levels = c(TRUE, FALSE)))
-
-length <- d.plot %>%
-  ungroup() %>%
-  distinct(target_compound_label) %>%
-  nrow()
-  
-aspect_ratio <- 0.8
-n_rows <- 1
-n_cols <- 1
-n_pages <- ceiling(length/(n_rows*n_cols))
-
-# pdf(file.path(out_dir, paste(date, "drug_sens_all_genes_expr_outlier_wrst_fdr_L10.pdf", sep = "_")),
-#     width = 6, height = 3)
-# for(i in 1:n_pages){
-#   p <-  ggplot(d.plot, aes(x = expr_low_flag, y = dependency)) +
-#     geom_hline(yintercept = 0) +
-#     geom_jitter(aes(color = expr_low_flag), width = 0.3) +
-#     geom_boxplot(alpha = 0) +
-#     geom_signif(comparisons = list(c(1, 2)),
-#                 map_signif_level = FALSE,
-#                 test = "wilcox.test",
-#                 # test.args = list(alternative = "less", p.adjust.method = "BH"),
-#                 # annotations = fdr_labels, # fix this to get FDR plotted direclty
-#                 textsize = 3.2) +
-#     # add_pvalue(d.fdr_labels) +
-#     ## adds 10% of space on top & bottom so p-value label will fit
-#     scale_y_continuous(expand = expansion(mult = 0.15)) +
-#     scale_color_manual(values = c("blue", "gray50")) +
-#     labs(x = "Expr_outlier_low",
-#          y = "LFC_treated_vs_DMSO") +
-#     theme_bw() +
-#     theme(aspect.ratio = aspect_ratio,
-#           axis.text = element_text(color = "black"),
-#           axis.ticks = element_line(color = "black"),
-#           legend.position = "none") +
-#     facet_wrap_paginate(~target_compound_label, scales = "free_y",
-#                         nrow = n_rows, ncol = n_cols, page = i)
-# 
-#   q <- ggplot(d.plot, aes(x = target, y = log_tpm)) +
-#     geom_jitter(aes(color = expr_low_flag), width = 0.3) +
-#     geom_boxplot(alpha = 0) +
-#     ## adds 10% of space on top & bottom so p-value label will fit
-#     # scale_y_continuous(expand = expansion(mult = 0.15)) +
-#     scale_color_manual(values = c("blue", "gray50")) +
-#     labs(x = "target", y = "log2(TPM)") +
-#     theme_bw() +
-#     theme(aspect.ratio = aspect_ratio,
-#           axis.text = element_text(color = "black"),
-#           axis.ticks = element_line(color = "black")) +
-#     facet_wrap_paginate(~target_compound_label, scale = "free",
-#                         nrow = n_rows, ncol = n_cols, page = i)
-#   print(ggarrange(p, q, ncol = 2, align = "hv", common.legend = TRUE, legend = "right"))
-# }
-# dev.off()
-
-```
-
-
-
-
-##### Split into positive and negative outliers
-
-```{r}
-
-d.drug_sens_all_genes_expr_outlier <- d.drug_sens_all_genes_expr_outlier %>%
-  mutate(expr_outlier_flag = factor(expr_outlier_flag, levels = c("low", "neither", "high"))) 
-
-```
-
-
-```{r}
-
-
-d.drug_sens_all_genes_expr_outlier %>%
-  group_by(target, compound_id, expr_outlier_flag) %>%
-  summarize(n = n()) %>%
-  group_by(expr_outlier_flag) %>%
-  summarize(mean = mean(n),
-            median = median(n))
-
-## how many compounds/targets have 0 high or low outlier cell lines?
-d.drug_sens_all_genes_expr_outlier %>%
-  group_by(target, compound_id, expr_outlier_flag) %>%
-  summarize(n = n()) 
-
-d.drug_sens_all_genes_expr_outlier %>%
-  group_by(target, compound_id, expr_outlier_flag) %>%
-  summarize(n = n()) %>%
-  ungroup() %>%
-  group_by(target, compound_id) %>%
-  summarize(n = n())
-  
-
-```
-
-```{r}
-
-## low vs. neither (with high included but ignoring it) => 
-## calculate diff in median LFC between relevant groups
-
-d.drug_sens_all_genes_expr_outlier_low <- d.drug_sens_all_genes_expr_outlier %>%
-  group_by(target, compound_id) %>%
-  ## get rid of drug/targets that don't have any "low" cell lines
-  filter(any(expr_outlier_flag == "low")) %>%
-  ungroup() 
-
-d.drug_sens_all_genes_expr_outlier_low_grp_med_diff <- d.drug_sens_all_genes_expr_outlier_low %>%
-  group_by(target, compound_id, expr_outlier_flag) %>%
-  ## calculate median dependency score for each outlier group
-  summarize(grp_med_dependency = median(dependency)) %>%
-  pivot_wider(names_from = expr_outlier_flag, values_from = grp_med_dependency) %>%
-  ## calculate difference between low and neither groups
-  mutate(grp_med_diff = low - neither) %>%
-  dplyr::select(target, compound_id, grp_med_diff) 
-
-d.drug_sens_all_genes_expr_outlier_low <- d.drug_sens_all_genes_expr_outlier_low %>%
-  left_join(d.drug_sens_all_genes_expr_outlier_low_grp_med_diff, by = c("target", "compound_id"))
-
-## high vs. neither (with low included but ignoring it) => 
-## calculate diff in median LFC between relevant groups =>
-d.drug_sens_all_genes_expr_outlier_high <- d.drug_sens_all_genes_expr_outlier %>%
-  group_by(target, compound_id) %>%
-  ## get rid of drug/targets that don't have any "high" cell lines
-  filter(any(expr_outlier_flag == "high")) %>%
-  ungroup() 
-
-d.drug_sens_all_genes_expr_outlier_high_grp_med_diff <- d.drug_sens_all_genes_expr_outlier_high %>%
-  group_by(target, compound_id, expr_outlier_flag) %>%
-  ## calculate median dependency score for each outlier group
-  summarize(grp_med_dependency = median(dependency)) %>%
-  pivot_wider(names_from = expr_outlier_flag, values_from = grp_med_dependency) %>%
-  ## calculate difference between low and neither groups
-  mutate(grp_med_diff = high - neither) %>%
-  dplyr::select(target, compound_id, grp_med_diff) 
-
-d.drug_sens_all_genes_expr_outlier_high <- d.drug_sens_all_genes_expr_outlier_high %>%
-  left_join(d.drug_sens_all_genes_expr_outlier_high_grp_med_diff, by = c("target", "compound_id"))
-
-```
-
-
-
-```{r}
-
-## low outliers and drug sensitivity
-## calculate p-value (adjusted for multiple within-group tests?)
-d.drug_sens_all_genes_expr_outlier_low_wrst_pvals <- d.drug_sens_all_genes_expr_outlier_low %>%
-  ## remove cell lines that are high outliers (I think this makes sense... but I'm not sure)
-  filter(expr_outlier_flag != "high") %>%
-  group_by(target, compound_id) %>%
-  summarize(p_val = wilcox.test(dependency ~ expr_outlier_flag)$p.value)
-# d.drug_sens_all_genes_expr_outlier_low_wrst_sens_pvals
-
-## adjust for multiple testing overall
-d.stats <- BH_adjust(d.drug_sens_all_genes_expr_outlier_low_wrst_pvals)
-# d.stats
-
-d.drug_sens_all_genes_expr_outlier_low_wrst <- d.drug_sens_all_genes_expr_outlier_low %>%
-  left_join(d.stats, by = c("target", "compound_id")) 
-
-d.drug_sens_all_genes_expr_outlier_low_wrst_sens <- d.drug_sens_all_genes_expr_outlier_low_wrst %>%
-  filter(grp_med_diff < 0)
-
-d.drug_sens_all_genes_expr_outlier_low_wrst_resist <- d.drug_sens_all_genes_expr_outlier_low_wrst %>%
-  filter(grp_med_diff > 0)
-
-# d.drug_sens_all_genes_expr_outlier_low_wrst_resist
-
-## high outliers and drug sensitivity
-d.drug_sens_all_genes_expr_outlier_high_wrst_sens_pvals <- d.drug_sens_all_genes_expr_outlier_high %>%
-  ## remove cell lines that are high outliers (I think this makes sense... but I'm not sure)
-  filter(expr_outlier_flag != "low") %>%
-  group_by(target, compound_id) %>%
-  summarize(p_val = wilcox.test(dependency ~ expr_outlier_flag)$p.value)
-# d.drug_sens_all_genes_expr_outlier_high_wrst_sens_pvals
-
-## adjust for multiple testing overall
-d.stats <- BH_adjust(d.drug_sens_all_genes_expr_outlier_high_wrst_sens_pvals)
-# d.stats
-
-d.drug_sens_all_genes_expr_outlier_high_wrst <- d.drug_sens_all_genes_expr_outlier_high %>%
-  left_join(d.stats, by = c("target", "compound_id"))
-# d.drug_sens_all_genes_expr_outlier_high_wrst_sens
-
-## high outliers and drug sensitivity
-d.drug_sens_all_genes_expr_outlier_high_wrst_sens <- d.drug_sens_all_genes_expr_outlier_high_wrst %>%
-  ## remove cell lines that are high outliers (I think this makes sense... but I'm not sure)
-  filter(grp_med_diff < 0)
-
-d.drug_sens_all_genes_expr_outlier_high_wrst_resist <- d.drug_sens_all_genes_expr_outlier_high_wrst %>%
-  ## remove cell lines that are high outliers (I think this makes sense... but I'm not sure)
-  filter(grp_med_diff > 0)
-
-```
-
-```{r}
-
-## low outliers
-summarize_stats(d.drug_sens_all_genes_expr_outlier_low_wrst_sens)
-summarize_stats(d.drug_sens_all_genes_expr_outlier_low_wrst_resist)
-
-## high outliers
-summarize_stats(d.drug_sens_all_genes_expr_outlier_high_wrst_sens)
-summarize_stats(d.drug_sens_all_genes_expr_outlier_high_wrst_resist)
-
-```
-
-###### Plot outliers
-
-
-## REMOVE BELOW CHUNK?
-For deparsing variables to use in dplyr: https://cran.r-project.org/web/packages/dplyr/vignettes/programming.html
-```{r}
-
-# make_outlier_plot <- function(df, direction, col_name, stat_cutoff, plot_n){
-#   
-#   ## save col_name as a string for later use
-#   stat_name <- deparse(substitute(col_name))
-#   
-#   ## remove the first 2 characters of dataframe name
-#   df_name <- str_sub(deparse(substitute(df)), start = 3)
-# 
-#   d.plot <- df %>% 
-#     ungroup() %>%
-#     ##use {{}} to deparse variable name for use in dplyr functions
-#     filter({{col_name}} < stat_cutoff) %>%
-#     unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
-#     mutate("target_compound_label" = reorder(target_compound_label, {{col_name}}),
-#            "target" = reorder(target, {{col_name}})) #%>%
-#   
-#   if(plot_n == "all") {
-#     ## do nothing to the df
-#     ## save output file name
-#     file_name <- paste0(date, "_", df_name, "_", stat_name, "_L", stat_cutoff, "all.pdf")
-#   
-#   } else {
-#     plot_pairs <- d.plot %>%
-#       arrange({{col_name}}) %>%
-#       distinct(target_compound_label) %>%
-#       head(n = plot_n) %>%
-#       pull(target_compound_label)
-#         
-#     d.plot <- d.plot %>%
-#       filter(target_compound_label %in% plot_pairs)
-#     
-#     ## save output file name
-#     file_name <- paste0(date, "_", df_name, "_", stat_name, "_L", stat_cutoff, "_top", plot_n, ".pdf")
-#   }
-# 
-#   ## make df to label adjusted FDR/p-val for each plot
-#   d.label <- d.plot %>%
-#     group_by(target, compound_id) %>%
-#     mutate(y.position = (max(dependency) + 0.1*(max(dependency) - min(dependency)))) %>%
-#     dplyr::ungroup() %>%
-#     dplyr::select(target_compound_label, p_val, fdr, y.position) %>%
-#     distinct(target_compound_label, .keep_all = TRUE) %>%
-#     mutate(group1 = direction,
-#            group2 = "neither",
-#            p_val = scientific(p_val, 3),
-#            fdr = scientific(fdr, 3)) 
-#   d.label
-#   
-#   length <- d.plot %>%
-#     ungroup() %>%
-#     distinct(target_compound_label) %>%
-#     nrow()
-#     
-#   aspect_ratio <- 1
-#   n_rows <- 1
-#   n_cols <- 1
-#   n_pages <- ceiling(length/(n_rows*n_cols))
-#   
-#   ## make stat label for labeling significance brackets
-#   if(stat_name == "p_val"){
-#     tmp_label <- str_sub(stat_name, end = 1)
-#     stat_label <- paste0(toupper(tmp_label), " = ", "{", stat_name, "}")
-#   } else if (stat_name == "fdr"){
-#     stat_label <- paste0(toupper(stat_name), " = ", "{", stat_name, "}")
-#   } else{
-#     cat("\nPlease enter a valid statistic (p-value or FDR)")
-#   }
-#   
-#   # stat_label <- paste0(toupper(stat_name), " = ", "{", stat_name, "}")
-# 
-#   pdf(file.path(out_dir, file_name), width = 6, height = 3)
-#   for(i in 1:n_pages){
-#     p <-  ggplot(d.plot, aes(x = expr_outlier_flag, y = dependency)) +
-#       geom_hline(yintercept = 0) +
-#       geom_jitter(aes(color = expr_outlier_flag), width = 0.3) +
-#       geom_boxplot(alpha = 0) +
-#       stat_pvalue_manual(d.label, label = stat_label, tip.length = 0.03, size = 3, vjust = -0.5) +
-#       ## adds extra space on top & bottom so p-value label will fit
-#       scale_y_continuous(expand = expansion(mult = 0.15)) +
-#       scale_color_manual(values = c("low" = "blue", "neither" = "gray50", "high" = "red")) +
-#       labs(x = "Expression_group",
-#            y = "LFC_treated_vs_DMSO") +
-#       theme_bw() +
-#       theme(aspect.ratio = aspect_ratio,
-#             axis.text = element_text(color = "black"),
-#             axis.ticks = element_line(color = "black"),
-#             legend.position = "none") +
-#       facet_wrap_paginate(~target_compound_label, scales = "free_y",
-#                           nrow = n_rows, ncol = n_cols, page = i)
-# 
-#     q <- ggplot(d.plot, aes(x = target, y = log_tpm)) +
-#       geom_jitter(aes(color = expr_outlier_flag), width = 0.3) +
-#       geom_boxplot(alpha = 0) +
-#       scale_color_manual(values = c("low" = "blue", "neither" = "gray50", "high" = "red")) +
-#       labs(x = "Target", y = "log2(TPM)") +
-#       theme_bw() +
-#       theme(aspect.ratio = aspect_ratio,
-#             axis.text = element_text(color = "black"),
-#             axis.ticks = element_line(color = "black")) +
-#       facet_wrap_paginate(~target_compound_label, scale = "free",
-#                           nrow = n_rows, ncol = n_cols, page = i)
-#     print(ggarrange(p, q, ncol = 2, align = "hv", common.legend = TRUE, legend = "right"))
-#   }
-#   dev.off()
-#   
-# }
-
-
-```
-
-```{r}
-
-make_outlier_plot <- function(df, x_var, x_title, y_var, y_title, direction, col_name, stat_cutoff, plot_n){
-  
-  ## save col_name as a string for later use
-  stat_name <- deparse(substitute(col_name))
-  
-  ## remove the first 2 characters of dataframe name
-  df_name <- str_sub(deparse(substitute(df)), start = 3)
-
-  d.plot <- df %>% 
-    ungroup() %>%
-    ## use {{}} to deparse variable name for use in dplyr functions
-    filter({{col_name}} < stat_cutoff) %>%
-    unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
-    mutate("target_compound_label" = reorder(target_compound_label, {{col_name}}),
-           "target" = reorder(target, {{col_name}})) #%>%
-  
-  if(plot_n == "all") {
-    ## do nothing to the df
-    ## save output file name
-    file_name <- paste0(date, "_", df_name, "_", stat_name, "_L", stat_cutoff, "all.pdf")
-  
-  } else {
-    plot_pairs <- d.plot %>%
-      arrange({{col_name}}) %>%
-      distinct(target_compound_label) %>%
-      head(n = plot_n) %>%
-      pull(target_compound_label)
-        
-    d.plot <- d.plot %>%
-      filter(target_compound_label %in% plot_pairs)
-    
-    ## save output file name
-    file_name <- paste0(date, "_", df_name, "_", stat_name, "_L", stat_cutoff, "_top", plot_n, ".pdf")
-  }
-
-  ## make df to label adjusted FDR/p-val for each plot
-  d.label <- d.plot %>%
-    group_by(target, compound_id) %>%
-    mutate(y.position = (max(dependency) + 0.1*(max(dependency) - min(dependency)))) %>%
-    dplyr::ungroup() %>%
-    dplyr::select(target_compound_label, p_val, fdr, y.position) %>%
-    distinct(target_compound_label, .keep_all = TRUE) %>%
-    mutate(group1 = direction,
-           group2 = "neither",
-           p_val = scientific(p_val, 3),
-           fdr = scientific(fdr, 3)) 
-  d.label
-  
-  length <- d.plot %>%
-    ungroup() %>%
-    distinct(target_compound_label) %>%
-    nrow()
-    
-  aspect_ratio <- 1
-  n_rows <- 1
-  n_cols <- 1
-  n_pages <- ceiling(length/(n_rows*n_cols))
-  
-  ## make stat label for labeling significance brackets
-  if(stat_name == "p_val"){
-    tmp_label <- str_sub(stat_name, end = 1)
-    stat_label <- paste0(toupper(tmp_label), " = ", "{", stat_name, "}")
-  } else if (stat_name == "fdr"){
-    stat_label <- paste0(toupper(stat_name), " = ", "{", stat_name, "}")
-  } else{
-    cat("\nPlease enter a valid statistic (p-value or FDR)")
-  }
-  
-  # stat_label <- paste0(toupper(stat_name), " = ", "{", stat_name, "}")
-
-  pdf(file.path(out_dir, file_name), width = 6, height = 3)
-  for(i in 1:n_pages){
-    p <-  ggplot(d.plot, aes_string(x = x_var[1], y = y_var[1])) +
-      geom_hline(yintercept = 0) +
-      geom_jitter(aes(color = expr_outlier_flag), width = 0.3) +
-      geom_boxplot(alpha = 0) +
-      stat_pvalue_manual(d.label, label = stat_label, tip.length = 0.03, size = 3, vjust = -0.5) +
-      ## adds extra space on top & bottom so p-value label will fit
-      scale_y_continuous(expand = expansion(mult = 0.15)) +
-      # scale_color_manual(values = c("low" = "blue", "neither" = "gray50", "high" = "red")) +
-      scale_color_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F", "high" = "#B84250")) +
-      labs(x = x_title[1],
-           y = y_title[1]) +
-      theme_bw() +
-      theme(aspect.ratio = aspect_ratio,
-            axis.text = element_text(color = "black"),
-            axis.ticks = element_line(color = "black"),
-            legend.position = "none") +
-      facet_wrap_paginate(~target_compound_label, scales = "free_y",
-                          nrow = n_rows, ncol = n_cols, page = i)
-
-    q <- ggplot(d.plot, aes_string(x = x_var[2], y = y_var[2])) +
-      geom_jitter(aes(color = expr_outlier_flag), width = 0.3) +
-      geom_boxplot(alpha = 0) +
-      # scale_color_manual(values = c("low" = "blue", "neither" = "gray50", "high" = "red")) +
-      scale_color_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F", "high" = "#B84250")) +
-      labs(x = x_title[2], y = y_title[2]) +
-      theme_bw() +
-      theme(aspect.ratio = aspect_ratio,
-            axis.text = element_text(color = "black"),
-            axis.ticks = element_line(color = "black")) +
-      facet_wrap_paginate(~target_compound_label, scale = "free",
-                          nrow = n_rows, ncol = n_cols, page = i)
-    print(ggarrange(p, q, ncol = 2, align = "hv", common.legend = TRUE, legend = "right"))
-  }
-  dev.off()
-  
-}
-
-
-```
-
-
-```{r}
-
-# make_outlier_plot(d.drug_sens_all_genes_expr_outlier_low_wrst_sens,
-#                   ## x-axis info
-#                   c("expr_outlier_flag", "target"), c("Expression_group", "Target"),
-#                   ## y-axis info
-#                   c("dependency", "log_tpm"), c("LFC_treated_vs_DMSO", "log2(TPM)"),
-#                   ## other information
-#                   "low", p_val, 0.05, 50)
-# 
-# make_outlier_plot(d.drug_sens_all_genes_expr_outlier_low_wrst_resist,
-#                   ## x-axis info
-#                   c("expr_outlier_flag", "target"), c("Expression_group", "Target"),
-#                   ## y-axis info
-#                   c("dependency", "log_tpm"), c("LFC_treated_vs_DMSO", "log2(TPM)"),
-#                   ## other information
-#                   "low", fdr, 0.1, 1)
-# 
-# make_outlier_plot(d.drug_sens_all_genes_expr_outlier_high_wrst_sens,
-#                   ## x-axis info
-#                   c("expr_outlier_flag", "target"), c("Expression_group", "Target"),
-#                   ## y-axis info
-#                   c("dependency", "log_tpm"), c("LFC_treated_vs_DMSO", "log2(TPM)"),
-#                   ## other information
-#                   "high", p_val, 0.05, 50)
-# 
-# make_outlier_plot(d.drug_sens_all_genes_expr_outlier_high_wrst_resist,
-#                   ## x-axis info
-#                   c("expr_outlier_flag", "target"), c("Expression_group", "Target"),
-#                   ## y-axis info
-#                   c("dependency", "log_tpm"), c("LFC_treated_vs_DMSO", "log2(TPM)"),
-#                   ## other information
-#                   "high", p_val, 0.05, 50)
-
-
-```
-
-```{r}
-
-# make_outlier_plot(d.drug_sens_all_genes_expr_outlier_low_wrst_sens, "low", p_val, 0.05, 50)
-# 
-# make_outlier_plot(d.drug_sens_all_genes_expr_outlier_low_wrst_resist, "low", p_val, 0.05, 50)
-# 
-# make_outlier_plot(d.drug_sens_all_genes_expr_outlier_high_wrst_sens, "high", p_val, 0.05, 50)
-# 
-# make_outlier_plot(d.drug_sens_all_genes_expr_outlier_high_wrst_resist, "high", p_val, 0.05, 50)
-
-```
-
-```{r}
-
-write_output_df <- function(df, col_name, stat_cutoff){
-  
-  df_out <- df %>%
-    filter({{col_name}} < stat_cutoff) %>%
-    arrange({{col_name}}) %>%
-    distinct(target, compound_id, .keep_all = TRUE) %>%
-    dplyr::select(target, compound_name, grp_med_diff, p_val, fdr)
-  
-  df_name <- deparse(substitute(df))
-  stat_name <- deparse(substitute(col_name))
-  
-  # df_name <- paste0(deparse(substitute(df)), "_",
-  #                   deparse(substitute(col_name)), "_",
-  #                   "L", stat_cutoff, ".txt")
-  # print(df_name)
-  # print(stat_name)
-  
-  # print(nrow(df_out))
-  
-  out_path <- file.path(out_dir, paste0(df_name, "_", stat_name, "_", "L", stat_cutoff, ".txt"))
-  # print(out_path)
-  
-  write_tsv(df_out, out_path)
-  
-  cat("\ndf written to", out_path)
-}
-
-
-```
-
-
-```{r}
-
-# write_output_df(d.drug_sens_all_genes_expr_outlier_low_wrst_sens, p_val, 0.05)
-# 
-# write_output_df(d.drug_sens_all_genes_expr_outlier_low_wrst_resist, p_val, 0.05)
-# 
-# write_output_df(d.drug_sens_all_genes_expr_outlier_high_wrst_sens, p_val, 0.05)
-# 
-# write_output_df(d.drug_sens_all_genes_expr_outlier_high_wrst_resist, p_val, 0.05)
-
-```
-
-
-##### Plot lineage
-
-```{r}
-
-make_lineage_plot <- function(df, x_var, x_title, y_var, y_title, col_name, stat_cutoff, plot_n){
-  
-  ## save col_name as a string for later use
-  stat_name <- deparse(substitute(col_name))
-  
-  ## remove the first 2 characters of dataframe name
-  df_name <- str_sub(deparse(substitute(df)), start = 3)
-
-  d.plot <- df %>% 
-    ungroup() %>%
-    ##use {{}} to deparse variable name for use in dplyr functions
-    filter({{col_name}} < stat_cutoff) %>%
-    unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
-    mutate("target_compound_label" = reorder(target_compound_label, {{col_name}}),
-           "target" = reorder(target, {{col_name}})) #%>%
-  
-    if(plot_n == "all") {
-      ## don't do anything to the df
-      ## save output file name
-      file_name <- paste0(date, "_", df_name, "_", stat_name, "_L", stat_cutoff, "_all_lineage.pdf")
-    
-  } else {
-      plot_pairs <- d.plot %>%
-        arrange({{col_name}}) %>%
-        distinct(target_compound_label) %>%
-        head(n = plot_n) %>%
-        pull(target_compound_label)
-      
-      d.plot <- d.plot %>%
-        filter(target_compound_label %in% plot_pairs)
-      
-      ## save output file name
-      file_name <- paste0(date, "_", df_name, "_", stat_name, "_L", stat_cutoff, "_top", plot_n, "_lineage.pdf")
-  }
-  
-  length <- d.plot %>%
-    ungroup() %>%
-    distinct(target_compound_label) %>%
-    nrow()
-    
-  # aspect_ratio <- 1
-  n_rows <- 1
-  n_cols <- 1
-  n_pages <- ceiling(length/(n_rows*n_cols))
-  
-  ## make stat label for labeling significance brackets
-  stat_label <- paste0(toupper(stat_name), " = ", "{", stat_name, "}")
-
-  ## save output file name
-  file_name <- paste(date, df_name, stat_name, "L", stat_cutoff, "cell_lineage.pdf", sep = "_")
-
-  pdf(file.path(out_dir, file_name), width = 6, height = 4)
-  for(i in 1:n_pages){
-
-    q <- ggplot(d.plot, aes_string(x = x_var, y = y_var)) +
-      geom_jitter(aes(color = expr_outlier_flag), width = 0.3, size = 1) +
-      geom_boxplot(alpha = 0) +
-      scale_color_manual(values = c("low" = "blue", "neither" = "gray50", "high" = "red")) +
-      labs(x = x_title, y = y_title) +
-      theme_bw() +
-      theme(#aspect.ratio = aspect_ratio,
-            axis.text = element_text(color = "black"),
-            axis.ticks = element_line(color = "black"),
-            axis.text.x = element_text(angle = 45, hjust=1)) +
-      facet_wrap_paginate(~target_compound_label, scale = "free",
-                          nrow = n_rows, ncol = n_cols, page = i)
-    print(ggarrange(q, ncol = 1, align = "hv", legend = "right"))
-  }
-  dev.off()
-  
-}
-
-
-```
-
-```{r}
-
-# make_lineage_plot(d.drug_sens_all_genes_expr_outlier_low_wrst_sens, 
-#                   "lineage", "Cell_lineage", 
-#                   "log_tpm", "log2(TPM)",
-#                   p_val, 0.05, 50)
-# # 
-# make_lineage_plot(d.drug_sens_all_genes_expr_outlier_low_wrst_resist, 
-#                   "lineage", "Cell_lineage", 
-#                   "log_tpm", "log2(TPM)",
-#                   p_val, 0.05, 50)
-# # 
-# make_lineage_plot(d.drug_sens_all_genes_expr_outlier_high_wrst_sens, 
-#                   "lineage", "Cell_lineage", 
-#                   "log_tpm", "log2(TPM)",
-#                   p_val, 0.05, 50)
-# # 
-# make_lineage_plot(d.drug_sens_all_genes_expr_outlier_high_wrst_resist, 
-#                   "lineage", "Cell_lineage", 
-#                   "log_tpm", "log2(TPM)",
-#                   p_val, 0.05, 50)
-
-```
-
-
-
-## Paralogs
-
-### PRISM Phase 1 drug sensitivity
-
-```{r}
-
-## add target col so single-gene functions will work
-d.DeKegel_top5_pairs_drug_sens_expr <- d.DeKegel_top5_pairs_drug_sens_expr %>%
-  mutate(target = sorted_gene_pair)
-d.DeKegel_top5_pairs_drug_sens_expr
-
-```
-
-#### Continuous/linear regression
-
-```{r}
-
-## running lm for each sorted_gene_pair/compound_id group
-
-## combined expr
-## use broom::glance to get rsquared and pval
-# d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_summary <- d.DeKegel_top5_pairs_drug_sens_expr %>%
-#   filter(!is.na(dependency)) %>%
-#   filter(!is.na(combined_log_tpm)) %>%
-#   group_by(target, compound_id) %>%
-#   group_modify(~ broom::glance(lm(dependency ~ combined_log_tpm, data = .x))) %>%
-#   dplyr::ungroup() %>%
-#   rename(r_squared = r.squared, p_val = p.value)
-# # d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_summary
-# 
-# ## FDR-adjust p-vals for multiple testing and add back to summary DF
-# d.stats <- BH_adjust(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_summary)
-# # d.stats
-# 
-# d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_summary <- d.stats %>%
-#   dplyr::select(-p_val) %>%
-#   right_join(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_summary, by = c("target", "compound_id")) %>%
-#   dplyr::select(target, compound_id, r_squared, p_val, fdr)
-# # d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_summary
-# 
-# ## use broom::tidy to get slope
-# ## it's definitely redundant to run the lm twice but I can't figure out how to 
-# ## get it to work otherwise, because group_modify expects a DF output
-# d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_slope <- d.DeKegel_top5_pairs_drug_sens_expr %>%
-#   filter(!is.na(dependency)) %>%
-#   filter(!is.na(combined_log_tpm)) %>%
-#   group_by(target, compound_id) %>%
-#   group_modify(~ broom::tidy(lm(dependency ~ combined_log_tpm, data = .x))) %>%
-#   dplyr::ungroup() %>%
-#   ## extract slope of lm fit line from output
-#   filter(term == "combined_log_tpm") %>%
-#   rename(slope = estimate) %>%
-#   dplyr::select(target, compound_id, slope) 
-# # d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_slope
-# 
-# ## add rsquared, p-val, fdr, and slope info to main DF
-# d.DeKegel_top5_pairs_drug_sens_combined_expr_lm <- d.DeKegel_top5_pairs_drug_sens_expr %>%
-#   left_join(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_summary, by = c("target", "compound_id")) %>%
-#   left_join(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_slope, by = c("target", "compound_id")) %>%
-#   filter(!is.na(dependency)) %>%
-#   filter(!is.na(combined_log_tpm))
-# 
-# summarize_stats(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm)
-
-```
-
-```{r}
-
-## A1 expr
-
-## use broom::glance to get rsquared and pval
-d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_summary <- d.DeKegel_top5_pairs_drug_sens_expr %>%
-  filter(!is.na(dependency)) %>%
-  filter(!is.na(A1_log_tpm)) %>%
-  group_by(target, compound_id) %>%
-  group_modify(~ broom::glance(lm(dependency ~ A1_log_tpm, data = .x))) %>%
-  dplyr::ungroup() %>%
-  rename(r_squared = r.squared, p_val = p.value)
-# d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_summary
-
-## FDR-adjust p-vals for multiple testing and add back to summary DF
-d.stats <- BH_adjust(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_summary)
-# d.stats
-
-d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_summary <- d.stats %>%
-  dplyr::select(-p_val) %>%
-  right_join(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_summary, by = c("target", "compound_id")) %>%
-  dplyr::select(target, compound_id, r_squared, p_val, fdr)
-# d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_summary
-
-## use broom::tidy to get slope
-## it's definitely redundant to run the lm twice but I can't figure out how to 
-## get it to work otherwise, because group_modify expects a DF output
-d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_slope <- d.DeKegel_top5_pairs_drug_sens_expr %>%
-  filter(!is.na(dependency)) %>%
-  filter(!is.na(A1_log_tpm)) %>%
-  group_by(target, compound_id) %>%
-  group_modify(~ broom::tidy(lm(dependency ~ A1_log_tpm, data = .x))) %>%
-  dplyr::ungroup() %>%
-  ## extract slope of lm fit line from output
-  filter(term == "A1_log_tpm") %>%
-  rename(slope = estimate) %>%
-  dplyr::select(target, compound_id, slope) 
-# d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_slope
-
-## add rsquared, p-val, fdr, and slope info to main DF
-d.DeKegel_top5_pairs_drug_sens_A1_expr_lm <- d.DeKegel_top5_pairs_drug_sens_expr %>%
-  left_join(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_summary, by = c("target", "compound_id")) %>%
-  left_join(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_slope, by = c("target", "compound_id")) %>%
-  filter(!is.na(dependency)) %>%
-  filter(!is.na(A1_log_tpm))
-
-summarize_stats(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm)
-
-```
-
-```{r}
-
-## A2 expr
-
-## use broom::glance to get rsquared and pval
-d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_summary <- d.DeKegel_top5_pairs_drug_sens_expr %>%
-  filter(!is.na(dependency)) %>%
-  filter(!is.na(A2_log_tpm)) %>%
-  group_by(target, compound_id) %>%
-  group_modify(~ broom::glance(lm(dependency ~ A2_log_tpm, data = .x))) %>%
-  dplyr::ungroup() %>%
-  rename(r_squared = r.squared, p_val = p.value)
-# d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_summary
-
-## FDR-adjust p-vals for multiple testing and add back to summary DF
-d.stats <- BH_adjust(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_summary)
-# d.stats
-
-d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_summary <- d.stats %>%
-  dplyr::select(-p_val) %>%
-  right_join(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_summary, by = c("target", "compound_id")) %>%
-  dplyr::select(target, compound_id, r_squared, p_val, fdr)
-# d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_summary
-
-## use broom::tidy to get slope
-## it's definitely redundant to run the lm twice but I can't figure out how to 
-## get it to work otherwise, because group_modify expects a DF output
-d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_slope <- d.DeKegel_top5_pairs_drug_sens_expr %>%
-  filter(!is.na(dependency)) %>%
-  filter(!is.na(A2_log_tpm)) %>%
-  group_by(target, compound_id) %>%
-  group_modify(~ broom::tidy(lm(dependency ~ A2_log_tpm, data = .x))) %>%
-  dplyr::ungroup() %>%
-  ## extract slope of lm fit line from output
-  filter(term == "A2_log_tpm") %>%
-  rename(slope = estimate) %>%
-  dplyr::select(target, compound_id, slope) 
-# d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_slope
-
-## add rsquared, p-val, fdr, and slope info to main DF
-d.DeKegel_top5_pairs_drug_sens_A2_expr_lm <- d.DeKegel_top5_pairs_drug_sens_expr %>%
-  left_join(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_summary, by = c("target", "compound_id")) %>%
-  left_join(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_slope, by = c("target", "compound_id")) %>%
-  filter(!is.na(dependency)) %>%
-  filter(!is.na(A2_log_tpm))
-
-summarize_stats(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm)
-
-```
-
-
-
-```{r}
-
-## number of pairs with negative vs. positive slope
-# d.DeKegel_top5_pairs_drug_sens_combined_expr_lm %>%
-#   distinct(target, compound_id, .keep_all = TRUE) %>%
-#   mutate(slope_flag = ifelse(slope < 0, "negative", "positive")) %>%
-#   group_by(slope_flag) %>%
-#   summarize(n = n())
-
-d.DeKegel_top5_pairs_drug_sens_A1_expr_lm %>%
-  distinct(target, compound_id, .keep_all = TRUE) %>%
-  mutate(slope_flag = ifelse(slope < 0, "negative", "positive")) %>%
-  group_by(slope_flag) %>%
-  summarize(n = n())
-
-d.DeKegel_top5_pairs_drug_sens_A2_expr_lm %>%
-  distinct(target, compound_id, .keep_all = TRUE) %>%
-  mutate(slope_flag = ifelse(slope < 0, "negative", "positive")) %>%
-  group_by(slope_flag) %>%
-  summarize(n = n())
-
-```
-
-
-```{r}
-
-# ## get low expression = low LFC pairs (positive slope)
-# d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_pos_slope <-d.DeKegel_top5_pairs_drug_sens_combined_expr_lm %>%
-#   filter(slope > 0)
-# summarize_stats(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_pos_slope)
-# 
-# ## get high expression = low LFC pairs (negative slope)
-# d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_neg_slope <- d.DeKegel_top5_pairs_drug_sens_combined_expr_lm %>%
-#   filter(slope < 0)
-# summarize_stats(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_neg_slope)
-
-## get low expression = low LFC pairs (positive slope)
-d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_pos_slope <-d.DeKegel_top5_pairs_drug_sens_A1_expr_lm %>%
-  filter(slope > 0)
-summarize_stats(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_pos_slope)
-
-## get high expression = low LFC pairs (negative slope)
-d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_neg_slope <- d.DeKegel_top5_pairs_drug_sens_A1_expr_lm %>%
-  filter(slope < 0)
-summarize_stats(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_neg_slope)
-
-## get low expression = low LFC pairs (positive slope)
-d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_pos_slope <-d.DeKegel_top5_pairs_drug_sens_A2_expr_lm %>%
-  filter(slope > 0)
-summarize_stats(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_pos_slope)
-
-## get high expression = low LFC pairs (negative slope)
-d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_neg_slope <- d.DeKegel_top5_pairs_drug_sens_A2_expr_lm %>%
-  filter(slope < 0)
-summarize_stats(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_neg_slope)
-
-```
-
-##### Plot
-
+###### paralogs
 ```{r}
 
 make_paralog_lm_plot <- function(df, x_var, x_title, y_var, y_title, col_name, stat_cutoff, plot_n){
@@ -1508,56 +453,6 @@ make_paralog_lm_plot <- function(df, x_var, x_title, y_var, y_title, col_name, s
 ```
 
 ```{r}
-## run make_lm_plot function
-
-d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_pos_slope %>%
-  filter(fdr < 0.1) %>%
-  distinct(sorted_gene_pair) %>%
-  nrow()
-
-d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_pos_slope %>%
-  filter(fdr < 0.1) %>%
-  distinct(sorted_gene_pair) %>%
-  nrow()
-
-# d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_pos_slope
-
-## positive slope scatterplots
-# make_paralog_lm_plot(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_pos_slope,
-#              combined_log_tpm, "log2(Combined_TPM)",
-#              dependency, "LFC_treated_vs_DMSO",
-#              fdr, 0.1, 50)
-# 
-# make_paralog_lm_plot(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_pos_slope,
-#              A1_log_tpm, "log2(A1_TPM)",
-#              dependency, "LFC_treated_vs_DMSO",
-#              fdr, 0.1, "all")
-# 
-# make_paralog_lm_plot(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_pos_slope,
-#              A2_log_tpm, "log2(A2_TPM)",
-#              dependency, "LFC_treated_vs_DMSO",
-#              fdr, 0.1, 50)
-
-## negative slope scatterplots
-# make_paralog_lm_plot(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_neg_slope,
-#              combined_log_tpm, "log2(Combined_TPM)",
-#              dependency, "LFC_treated_vs_DMSO",
-#              fdr, 0.1, 50)
-# 
-# make_paralog_lm_plot(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_neg_slope,
-#              A1_log_tpm, "log2(A1_TPM)",
-#              dependency, "LFC_treated_vs_DMSO",
-#              fdr, 0.1, 50)
-# 
-# make_paralog_lm_plot(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_neg_slope,
-#              A2_log_tpm, "log2(A2_TPM)",
-#              dependency, "LFC_treated_vs_DMSO",
-#              fdr, 0.1, 50)
-
-```
-
-
-```{r}
 
 make_paralog_lm_lineage_plot <- function(df, x_var, x_title, y_title, col_name, stat_cutoff, plot_n){
   
@@ -1635,6 +530,1279 @@ make_paralog_lm_lineage_plot <- function(df, x_var, x_title, y_title, col_name, 
 
 
 ```
+
+##### outlier analysis
+```{r}
+
+make_outlier_plot <- function(df, x_var, x_title, y_var, y_title, direction, col_name, stat_cutoff, plot_n){
+  
+  ## save col_name as a string for later use
+  stat_name <- deparse(substitute(col_name))
+  
+  ## remove the first 2 characters of dataframe name
+  df_name <- str_sub(deparse(substitute(df)), start = 3)
+
+  d.plot <- df %>% 
+    ungroup() %>%
+    ## use {{}} to deparse variable name for use in dplyr functions
+    filter({{col_name}} < stat_cutoff) %>%
+    unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
+    mutate("target_compound_label" = reorder(target_compound_label, {{col_name}}),
+           "target" = reorder(target, {{col_name}})) #%>%
+  
+  if(plot_n == "all") {
+    ## do nothing to the df
+    ## save output file name
+    file_name <- paste0(date, "_", df_name, "_", stat_name, "_L", stat_cutoff, "all.pdf")
+  
+  } else {
+    plot_pairs <- d.plot %>%
+      arrange({{col_name}}) %>%
+      distinct(target_compound_label) %>%
+      head(n = plot_n) %>%
+      pull(target_compound_label)
+        
+    d.plot <- d.plot %>%
+      filter(target_compound_label %in% plot_pairs)
+    
+    ## save output file name
+    file_name <- paste0(date, "_", df_name, "_", stat_name, "_L", stat_cutoff, "_top", plot_n, ".pdf")
+  }
+
+  ## make df to label adjusted FDR/p-val for each plot
+  d.label <- d.plot %>%
+    group_by(target, compound_id) %>%
+    mutate(y.position = (max(dependency) + 0.1*(max(dependency) - min(dependency)))) %>%
+    dplyr::ungroup() %>%
+    dplyr::select(target_compound_label, p_val, fdr, y.position) %>%
+    distinct(target_compound_label, .keep_all = TRUE) %>%
+    mutate(group1 = direction,
+           group2 = "neither",
+           p_val = scientific(p_val, 3),
+           fdr = scientific(fdr, 3)) 
+  d.label
+  
+  length <- d.plot %>%
+    ungroup() %>%
+    distinct(target_compound_label) %>%
+    nrow()
+    
+  aspect_ratio <- 1
+  n_rows <- 1
+  n_cols <- 1
+  n_pages <- ceiling(length/(n_rows*n_cols))
+  
+  ## make stat label for labeling significance brackets
+  if(stat_name == "p_val"){
+    tmp_label <- str_sub(stat_name, end = 1)
+    stat_label <- paste0(toupper(tmp_label), " = ", "{", stat_name, "}")
+  } else if (stat_name == "fdr"){
+    stat_label <- paste0(toupper(stat_name), " = ", "{", stat_name, "}")
+  } else{
+    cat("\nPlease enter a valid statistic (p-value or FDR)")
+  }
+  
+  # stat_label <- paste0(toupper(stat_name), " = ", "{", stat_name, "}")
+
+  pdf(file.path(out_dir, file_name), width = 6, height = 3)
+  for(i in 1:n_pages){
+    p <-  ggplot(d.plot, aes_string(x = x_var[1], y = y_var[1])) +
+      geom_hline(yintercept = 0) +
+      geom_jitter(aes(color = expr_outlier_flag), width = 0.3) +
+      geom_boxplot(alpha = 0) +
+      stat_pvalue_manual(d.label, label = stat_label, tip.length = 0.03, size = 3, vjust = -0.5) +
+      ## adds extra space on top & bottom so p-value label will fit
+      scale_y_continuous(expand = expansion(mult = 0.15)) +
+      # scale_color_manual(values = c("low" = "blue", "neither" = "gray50", "high" = "red")) +
+      scale_color_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F", "high" = "#B84250")) +
+      labs(x = x_title[1],
+           y = y_title[1]) +
+      theme_bw() +
+      theme(aspect.ratio = aspect_ratio,
+            axis.text = element_text(color = "black"),
+            axis.ticks = element_line(color = "black"),
+            legend.position = "none") +
+      facet_wrap_paginate(~target_compound_label, scales = "free_y",
+                          nrow = n_rows, ncol = n_cols, page = i)
+
+    q <- ggplot(d.plot, aes_string(x = x_var[2], y = y_var[2])) +
+      geom_jitter(aes(color = expr_outlier_flag), width = 0.3) +
+      geom_boxplot(alpha = 0) +
+      # scale_color_manual(values = c("low" = "blue", "neither" = "gray50", "high" = "red")) +
+      scale_color_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F", "high" = "#B84250")) +
+      labs(x = x_title[2], y = y_title[2]) +
+      theme_bw() +
+      theme(aspect.ratio = aspect_ratio,
+            axis.text = element_text(color = "black"),
+            axis.ticks = element_line(color = "black")) +
+      facet_wrap_paginate(~target_compound_label, scale = "free",
+                          nrow = n_rows, ncol = n_cols, page = i)
+    print(ggarrange(p, q, ncol = 2, align = "hv", common.legend = TRUE, legend = "right"))
+  }
+  dev.off()
+  
+}
+
+
+```
+
+```{r}
+
+make_lineage_plot <- function(df, x_var, x_title, y_var, y_title, col_name, stat_cutoff, plot_n){
+  
+  ## save col_name as a string for later use
+  stat_name <- deparse(substitute(col_name))
+  
+  ## remove the first 2 characters of dataframe name
+  df_name <- str_sub(deparse(substitute(df)), start = 3)
+
+  d.plot <- df %>% 
+    ungroup() %>%
+    ##use {{}} to deparse variable name for use in dplyr functions
+    filter({{col_name}} < stat_cutoff) %>%
+    unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
+    mutate("target_compound_label" = reorder(target_compound_label, {{col_name}}),
+           "target" = reorder(target, {{col_name}})) #%>%
+  
+    if(plot_n == "all") {
+      ## don't do anything to the df
+      ## save output file name
+      file_name <- paste0(date, "_", df_name, "_", stat_name, "_L", stat_cutoff, "_all_lineage.pdf")
+    
+  } else {
+      plot_pairs <- d.plot %>%
+        arrange({{col_name}}) %>%
+        distinct(target_compound_label) %>%
+        head(n = plot_n) %>%
+        pull(target_compound_label)
+      
+      d.plot <- d.plot %>%
+        filter(target_compound_label %in% plot_pairs)
+      
+      ## save output file name
+      file_name <- paste0(date, "_", df_name, "_", stat_name, "_L", stat_cutoff, "_top", plot_n, "_lineage.pdf")
+  }
+  
+  length <- d.plot %>%
+    ungroup() %>%
+    distinct(target_compound_label) %>%
+    nrow()
+    
+  # aspect_ratio <- 1
+  n_rows <- 1
+  n_cols <- 1
+  n_pages <- ceiling(length/(n_rows*n_cols))
+  
+  ## make stat label for labeling significance brackets
+  stat_label <- paste0(toupper(stat_name), " = ", "{", stat_name, "}")
+
+  ## save output file name
+  file_name <- paste(date, df_name, stat_name, "L", stat_cutoff, "cell_lineage.pdf", sep = "_")
+
+  pdf(file.path(out_dir, file_name), width = 6, height = 4)
+  for(i in 1:n_pages){
+
+    q <- ggplot(d.plot, aes_string(x = x_var, y = y_var)) +
+      geom_jitter(aes(color = expr_outlier_flag), width = 0.3, size = 1) +
+      geom_boxplot(alpha = 0) +
+      scale_color_manual(values = c("low" = "blue", "neither" = "gray50", "high" = "red")) +
+      labs(x = x_title, y = y_title) +
+      theme_bw() +
+      theme(#aspect.ratio = aspect_ratio,
+            axis.text = element_text(color = "black"),
+            axis.ticks = element_line(color = "black"),
+            axis.text.x = element_text(angle = 45, hjust=1)) +
+      facet_wrap_paginate(~target_compound_label, scale = "free",
+                          nrow = n_rows, ncol = n_cols, page = i)
+    print(ggarrange(q, ncol = 1, align = "hv", legend = "right"))
+  }
+  dev.off()
+  
+}
+
+
+```
+
+
+
+#### Write output DF
+
+
+# Analysis
+
+## Single-gene
+
+### Phase 1 drug sensitivity
+
+#### Continuous/linear regression
+
+```{r}
+
+## running lm for each sorted_gene_pair/compound_id group
+
+## use broom::glance to get rsquared and pval
+d.drug_sens_all_genes_expr_lm_summary <- d.drug_sens_all_genes_expr %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(log_tpm)) %>%
+  group_by(target, compound_id) %>%
+  group_modify(~ broom::glance(lm(dependency ~ log_tpm, data = .x))) %>%
+  dplyr::ungroup() %>%
+  rename(r_squared = r.squared, p_val = p.value)
+d.drug_sens_all_genes_expr_lm_summary
+
+## FDR-adjust p-vals for multiple testing and add back to summary DF
+d.stats <- BH_adjust(d.drug_sens_all_genes_expr_lm_summary)
+d.stats
+
+```
+
+
+```{R}
+d.drug_sens_all_genes_expr_lm_summary <- d.stats %>%
+  dplyr::select(-p_val) %>%
+  right_join(d.drug_sens_all_genes_expr_lm_summary, by = c("target", "compound_id")) %>%
+  dplyr::select(target, compound_id, r_squared, p_val, fdr)
+d.drug_sens_all_genes_expr_lm_summary
+
+## use broom::tidy to get slope
+d.drug_sens_all_genes_expr_lm_slope <- d.drug_sens_all_genes_expr %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(log_tpm)) %>%
+  group_by(target, compound_id) %>%
+  group_modify(~ broom::tidy(lm(dependency ~ log_tpm, data = .x))) %>%
+  dplyr::ungroup() %>%
+  ## extract slope of lm fit line from output
+  filter(term == "log_tpm") %>%
+  rename(slope = estimate) %>%
+  dplyr::select(target, compound_id, slope) 
+d.drug_sens_all_genes_expr_lm_slope
+
+## add rsquared, p-val, fdr, and slope info to main DF
+d.drug_sens_all_genes_expr_lm <- d.drug_sens_all_genes_expr %>%
+  left_join(d.drug_sens_all_genes_expr_lm_summary, by = c("target", "compound_id")) %>%
+  left_join(d.drug_sens_all_genes_expr_lm_slope, by = c("target", "compound_id")) %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(log_tpm))
+
+summarize_stats(d.drug_sens_all_genes_expr_lm)
+
+```
+It's definitely redundant to run the lm twice but I can't figure out how to get it to work otherwise, because group_modify expects a DF output. 
+
+
+
+```{r}
+
+## number of pairs with negative vs. positive slope
+d.drug_sens_all_genes_expr_lm %>%
+  distinct(target, compound_id, .keep_all = TRUE) %>%
+  mutate(slope_flag = ifelse(slope < 0, "negative", "positive")) %>%
+  group_by(slope_flag) %>%
+  summarize(n = n())
+
+## get low expression = low LFC pairs (positive slope)
+d.drug_sens_all_genes_expr_lm_pos_slope <-d.drug_sens_all_genes_expr_lm %>%
+  filter(slope > 0)
+
+## get high expression = low LFC pairs (negative slope)
+d.drug_sens_all_genes_expr_lm_neg_slope <- d.drug_sens_all_genes_expr_lm %>%
+  filter(slope < 0)
+
+## summarize significant drug/gene combos for each new DF
+summarize_stats(d.drug_sens_all_genes_expr_lm_pos_slope)
+summarize_stats(d.drug_sens_all_genes_expr_lm_neg_slope)
+
+```
+
+##### Plot
+
+
+
+
+```{r}
+
+## run make_lm_plot function
+
+# make_lm_plot(d.drug_sens_all_genes_expr_lm_pos_slope, 
+#              "log_tpm", "log2(TPM)",
+#              "dependency", "LFC_treated_vs_DMSO",
+#              fdr, 0.1, 50)
+# 
+# make_lm_plot(d.drug_sens_all_genes_expr_lm_neg_slope, 
+#              "log_tpm", "log2(TPM)",
+#              "dependency", "LFC_treated_vs_DMSO", 
+#              fdr, 0.1, 50)
+
+```
+
+
+```{r}
+
+# d.drug_sens_all_genes_expr_lm_pos_slope %>% 
+#   arrange(fdr) %>%
+#   distinct(target, compound_id, .keep_all = TRUE) %>%
+#   dplyr::select(target, compound_id, r_squared:slope)
+# 
+# d.drug_sens_all_genes_expr_lm_pos_slope %>% 
+#   arrange(fdr) %>%
+#   distinct(target, compound_id, .keep_all = TRUE) %>%
+#   dplyr::select(target, compound_id, r_squared:slope) %>%
+#   head(n = 5) %>%
+#   pull(target)
+
+d.drug_sens_all_genes_expr_lm_pos_slope_fdr_L0.1 <- d.drug_sens_all_genes_expr_lm_pos_slope %>% 
+  filter(fdr < 0.1) %>%
+  arrange(fdr) %>%
+  distinct(target, compound_id, .keep_all = TRUE) %>%
+  dplyr::select(target, compound_name, slope, r_squared:fdr, moa)
+
+write_tsv(d.drug_sens_all_genes_expr_lm_pos_slope_fdr_L0.1,
+          file.path(out_dir, "d.drug_sens_all_genes_expr_lm_pos_slope_fdr_L0.1.txt"))
+
+d.drug_sens_all_genes_expr_lm_neg_slope_fdr_L0.1 <- d.drug_sens_all_genes_expr_lm_neg_slope %>% 
+  filter(fdr < 0.1) %>%
+  arrange(fdr) %>%
+  distinct(target, compound_id, .keep_all = TRUE) %>%
+  dplyr::select(target, compound_name, slope, r_squared:fdr, moa)
+write_tsv(d.drug_sens_all_genes_expr_lm_neg_slope_fdr_L0.1, 
+          file.path(out_dir, "d.drug_sens_all_genes_expr_lm_neg_slope_fdr_L0.1.txt"))
+
+```
+
+
+
+
+```{r}
+
+# make_lm_lineage_plot(d.drug_sens_all_genes_expr_lm_pos_slope, 
+#                      "lineage", "Lineage",
+#                      "log_tpm", "log2(TPM)",
+#                      fdr, 0.1, 50)
+# 
+# make_lm_lineage_plot(d.drug_sens_all_genes_expr_lm_neg_slope,  
+#                      "lineage", "Lineage",
+#                      "log_tpm", "log2(TPM)",
+#                      fdr, 0.1, 50)
+
+```
+
+```{r}
+# 
+# ## make volcano plot of r^2 vs. FDR...or something (how to indicate neg vs pos?)
+# d.volcano_plot <- d.drug_sens_all_genes_cn_lm %>% 
+#   ungroup() %>%
+#   # mutate(cn = 2^log_copy_number) %>%
+#   filter(!is.na(dependency)) %>%
+#   filter(!is.na(log_copy_number)) %>%
+#   unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
+#   mutate("target_compound_label" = reorder(target_compound_label, fdr),
+#          "target" = reorder(target, fdr))
+# 
+# ggplot(d.volcano_plot, aes(x = r_squared, y = -log10(fdr))) +
+#   geom_point()
+
+```
+
+```{r}
+
+# phase1_cn_labels <- d.phase1_cn_volcano_plot %>%
+#   filter(fdr < 0.1) %>%
+#   pull(new_label)
+# 
+# ggplot(d.phase1_cn_volcano_plot, aes(x = lfc_dependency_Q1_v_Q4, y = -log10(fdr))) +
+#   geom_hline(yintercept = 1, linetype = "dashed") +
+#   geom_vline(xintercept = 0, linetype = "dashed") +
+#   geom_point(color = ifelse(d.phase1_cn_volcano_plot$fdr < 0.1, "black", "gray50")) +
+#   geom_label_repel(data = subset(d.phase1_cn_volcano_plot, fdr < 0.1),
+#                    aes(label = phase1_cn_labels), 
+#                    segment.size = 0.2,
+#                    force = 0.5,
+#                    size = 2.5, 
+#                    alpha = 0.8, 
+#                    max.overlaps = Inf) +
+#   theme_bw() +
+#   theme(aspect.ratio = 0.75,
+#         axis.text = element_text(color = "black"),
+#         axis.ticks = element_line(color = "black"))
+# # ggsave(file.path(out_dir, "d.DeKegel_top5_combined_cn_drug_pair_median_dependency_lfc_fdr_volcano_plot.pdf"),
+# #        width = 6, height = 4, useDingbats = FALSE)
+
+```
+
+
+#### Z-scaled outliers
+
+```{r}
+
+## robustly scale expression data
+d.drug_sens_all_genes_expr_outlier <- d.drug_sens_all_genes_expr %>%
+  filter(!is.na(log_tpm)) %>%
+  filter(!is.na(dependency)) %>%
+  group_by(target, compound_id) %>% # is this correct?
+  mutate(scaled_log_tpm = RobScale(log_tpm, center = TRUE, scale = TRUE)) %>%
+  mutate(expr_outlier_flag = case_when(
+    scaled_log_tpm < -2 ~ "low",
+    scaled_log_tpm > 2 ~ "high", 
+    TRUE ~ "neither")) %>%
+  mutate(expr_low_flag = case_when(
+    scaled_log_tpm < -2 ~ TRUE,
+    TRUE ~ FALSE)) %>% ## if CN ≥ -2, classify as "not low"
+  ungroup()
+
+d.drug_sens_all_genes_expr_outlier %>%
+  group_by(expr_outlier_flag) %>%
+  summarize(n = n())
+
+d.drug_sens_all_genes_expr_outlier %>%
+  group_by(expr_low_flag) %>%
+  summarize(n = n())
+
+d.drug_sens_all_genes_expr_outlier %>%
+  group_by(target, compound_id) %>%
+  distinct(expr_low_flag) %>%
+  summarize(n = n()) %>%
+  filter(n < 2)
+
+```
+
+
+```{r}
+
+## calculate the WRST p-value for low-CN vs. not low-CN cell lines
+d.drug_sens_all_genes_expr_outlier_wrst_summary <- d.drug_sens_all_genes_expr_outlier %>%
+  group_by(target, compound_id) %>%
+  filter(any(expr_low_flag == TRUE)) %>% ## keep only groups where >1 cell line has low CN
+  summarize("p_val" = wilcox.test(dependency ~ expr_low_flag)$p.value)
+d.drug_sens_all_genes_expr_outlier_wrst_summary
+
+d.stats <- BH_adjust(d.drug_sens_all_genes_expr_outlier_wrst_summary)
+
+d.drug_sens_all_genes_expr_outlier_wrst_summary <- d.drug_sens_all_genes_expr_outlier_wrst_summary %>%
+  dplyr::select(-p_val) %>%
+  left_join(d.stats, by = c("target", "compound_id"))
+
+
+
+## add p-values and FDR to main DF
+d.drug_sens_all_genes_expr_outlier_wrst <- left_join(d.drug_sens_all_genes_expr_outlier,
+                                                   d.drug_sens_all_genes_expr_outlier_wrst_summary,
+                                                   by = c("target", "compound_id")) %>%
+  ungroup()
+d.drug_sens_all_genes_expr_outlier_wrst
+
+summarize_stats(d.drug_sens_all_genes_expr_outlier_wrst)
+
+
+## from script: CRISPR_screens/02_iCas9-HeLa/04_NGS_analysis/mageck/00_scripts/06_SL_paralog_druggability_and_expression.Rmd
+
+# ## calculate z-score for expression using scale() function
+# d.paralog.tpm.scaled <- d.paralog.tpm %>%
+#   group_by(gene_name, primary_disease) %>%
+#   mutate(tissue_expr_scaled=RobScale(expression, center=TRUE, scale=TRUE)) %>% # calculate z-score using scale()
+#   mutate(tissue_expr_outlier_broad=ifelse(abs(tissue_expr_scaled) > 2, TRUE, FALSE)) %>%
+#   mutate(tissue_expr_outlier_narrow=ifelse(is.na(tissue_expr_scaled), "NA", 
+#                                            ifelse(tissue_expr_scaled < -2, "negative",
+#                                                   ifelse(tissue_expr_scaled > 2, "positive", "neither")))) %>%
+#   ungroup()
+
+```
+
+```{r}
+
+## FDR adjust p-values and add back to DF
+# p_vals <- d.drug_sens_all_genes_expr_outlier_wrst %>%
+#   distinct(target, compound_id, .keep_all = TRUE) %>%
+#   arrange(p_val) %>%
+#   dplyr::select(p_val) %>%
+#   pull()
+# 
+# fdr_vals <- p.adjust(p_vals, method = "BH")
+# head(fdr_vals)
+# 
+# d.fdr_vals <- tibble(fdr = fdr_vals)
+# 
+# d.fdr_vals %>%
+#   filter(fdr < 0.05) %>%
+#   nrow()
+# 
+# d.fdr_vals %>%
+#   filter(fdr < 0.1) %>%
+#   nrow()
+# 
+# d.p_vals_labels <- d.drug_sens_all_genes_expr_outlier_wrst %>%
+#   distinct(target, compound_id, .keep_all = TRUE) %>%
+#   arrange(p_val) %>%
+#   dplyr::select(target, compound_id)
+# d.p_vals_labels
+# 
+# d.fdr_vals_labeled <- d.p_vals_labels %>%
+#   add_column(d.fdr_vals)
+# d.fdr_vals_labeled
+# 
+# d.drug_sens_all_genes_expr_outlier_wrst <- d.drug_sens_all_genes_expr_outlier_wrst %>%
+#   left_join(d.fdr_vals_labeled, by = c("target", "compound_id"))
+# d.drug_sens_all_genes_expr_outlier_wrst
+# 
+# d.stats <- BH_adjust(d.drug_sens_all_genes_expr_outlier_wrst)
+# 
+# d.drug_sens_all_genes_expr_outlier_wrst <- d.drug_sens_all_genes_expr_outlier_wrst %>%
+#   left_join(d.stats, by = c("target", "compound_id"))
+# 
+# summarize_stats(d.drug_sens_all_genes_expr_outlier_wrst)
+
+```
+
+##### Plot
+```{r}
+
+d.plot <- d.drug_sens_all_genes_expr_outlier_wrst %>% 
+  ungroup() %>%
+  filter(fdr < 0.1) %>%
+  unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
+  mutate("target_compound_label" = reorder(target_compound_label, fdr),
+         "target" = reorder(target, fdr)) %>%
+  mutate(expr_low_flag = factor(expr_low_flag, levels = c(TRUE, FALSE)))
+
+length <- d.plot %>%
+  ungroup() %>%
+  distinct(target_compound_label) %>%
+  nrow()
+
+# d.cn_plot <- d.plot %>%
+#   dplyr::select(target_compound_label, target, log_copy_number, cn_low_flag) 
+  
+aspect_ratio <- 0.8
+n_rows <- 1
+n_cols <- 1
+n_pages <- ceiling(length/(n_rows*n_cols))
+
+# pdf(file.path(out_dir, paste(date, "drug_sens_all_genes_expr_outlier_wrst_fdr_L10.pdf", sep = "_")),
+#     width = 6, height = 3)
+# for(i in 1:n_pages){
+#   p <-  ggplot(d.plot, aes(x = expr_low_flag, y = dependency)) +
+#     geom_hline(yintercept = 0) +
+#     geom_jitter(aes(color = expr_low_flag), width = 0.3) +
+#     geom_boxplot(alpha = 0) +
+#     geom_signif(comparisons = list(c(1, 2)),
+#                 map_signif_level = FALSE,
+#                 test = "wilcox.test",
+#                 # test.args = list(alternative = "less", p.adjust.method = "BH"),
+#                 # annotations = fdr_labels, # fix this to get FDR plotted direclty
+#                 textsize = 3.2) +
+#     # add_pvalue(d.fdr_labels) +
+#     ## adds 10% of space on top & bottom so p-value label will fit
+#     scale_y_continuous(expand = expansion(mult = 0.15)) +
+#     scale_color_manual(values = c("blue", "gray50")) +
+#     labs(x = "Expr_outlier_low",
+#          y = "LFC_treated_vs_DMSO") +
+#     theme_bw() +
+#     theme(aspect.ratio = aspect_ratio,
+#           axis.text = element_text(color = "black"),
+#           axis.ticks = element_line(color = "black"),
+#           legend.position = "none") +
+#     facet_wrap_paginate(~target_compound_label, scales = "free_y",
+#                         nrow = n_rows, ncol = n_cols, page = i)
+# 
+#   q <- ggplot(d.plot, aes(x = target, y = log_tpm)) +
+#     geom_jitter(aes(color = expr_low_flag), width = 0.3) +
+#     geom_boxplot(alpha = 0) +
+#     ## adds 10% of space on top & bottom so p-value label will fit
+#     # scale_y_continuous(expand = expansion(mult = 0.15)) +
+#     scale_color_manual(values = c("blue", "gray50")) +
+#     labs(x = "target", y = "log2(TPM)") +
+#     theme_bw() +
+#     theme(aspect.ratio = aspect_ratio,
+#           axis.text = element_text(color = "black"),
+#           axis.ticks = element_line(color = "black")) +
+#     facet_wrap_paginate(~target_compound_label, scale = "free",
+#                         nrow = n_rows, ncol = n_cols, page = i)
+#   print(ggarrange(p, q, ncol = 2, align = "hv", common.legend = TRUE, legend = "right"))
+# }
+# dev.off()
+
+```
+
+
+
+
+#### + and - outliers
+
+```{r}
+
+d.drug_sens_all_genes_expr_outlier <- d.drug_sens_all_genes_expr_outlier %>%
+  mutate(expr_outlier_flag = factor(expr_outlier_flag, levels = c("low", "neither", "high"))) 
+
+```
+
+
+```{r}
+
+
+d.drug_sens_all_genes_expr_outlier %>%
+  group_by(target, compound_id, expr_outlier_flag) %>%
+  summarize(n = n()) %>%
+  group_by(expr_outlier_flag) %>%
+  summarize(mean = mean(n),
+            median = median(n))
+
+## how many compounds/targets have 0 high or low outlier cell lines?
+d.drug_sens_all_genes_expr_outlier %>%
+  group_by(target, compound_id, expr_outlier_flag) %>%
+  summarize(n = n()) 
+
+d.drug_sens_all_genes_expr_outlier %>%
+  group_by(target, compound_id, expr_outlier_flag) %>%
+  summarize(n = n()) %>%
+  ungroup() %>%
+  group_by(target, compound_id) %>%
+  summarize(n = n())
+  
+
+```
+
+```{r}
+
+## low vs. neither (with high included but ignoring it) => 
+## calculate diff in median LFC between relevant groups
+
+d.drug_sens_all_genes_expr_outlier_low <- d.drug_sens_all_genes_expr_outlier %>%
+  group_by(target, compound_id) %>%
+  ## get rid of drug/targets that don't have any "low" cell lines
+  filter(any(expr_outlier_flag == "low")) %>%
+  ungroup() 
+
+d.drug_sens_all_genes_expr_outlier_low_grp_med_diff <- d.drug_sens_all_genes_expr_outlier_low %>%
+  group_by(target, compound_id, expr_outlier_flag) %>%
+  ## calculate median dependency score for each outlier group
+  summarize(grp_med_dependency = median(dependency)) %>%
+  pivot_wider(names_from = expr_outlier_flag, values_from = grp_med_dependency) %>%
+  ## calculate difference between low and neither groups
+  mutate(grp_med_diff = low - neither) %>%
+  dplyr::select(target, compound_id, grp_med_diff) 
+
+d.drug_sens_all_genes_expr_outlier_low <- d.drug_sens_all_genes_expr_outlier_low %>%
+  left_join(d.drug_sens_all_genes_expr_outlier_low_grp_med_diff, by = c("target", "compound_id"))
+
+## high vs. neither (with low included but ignoring it) => 
+## calculate diff in median LFC between relevant groups =>
+d.drug_sens_all_genes_expr_outlier_high <- d.drug_sens_all_genes_expr_outlier %>%
+  group_by(target, compound_id) %>%
+  ## get rid of drug/targets that don't have any "high" cell lines
+  filter(any(expr_outlier_flag == "high")) %>%
+  ungroup() 
+
+d.drug_sens_all_genes_expr_outlier_high_grp_med_diff <- d.drug_sens_all_genes_expr_outlier_high %>%
+  group_by(target, compound_id, expr_outlier_flag) %>%
+  ## calculate median dependency score for each outlier group
+  summarize(grp_med_dependency = median(dependency)) %>%
+  pivot_wider(names_from = expr_outlier_flag, values_from = grp_med_dependency) %>%
+  ## calculate difference between low and neither groups
+  mutate(grp_med_diff = high - neither) %>%
+  dplyr::select(target, compound_id, grp_med_diff) 
+
+d.drug_sens_all_genes_expr_outlier_high <- d.drug_sens_all_genes_expr_outlier_high %>%
+  left_join(d.drug_sens_all_genes_expr_outlier_high_grp_med_diff, by = c("target", "compound_id"))
+
+```
+
+
+
+
+
+
+```{r}
+
+## low outliers and drug sensitivity
+## calculate p-value (adjusted for multiple within-group tests?)
+d.drug_sens_all_genes_expr_outlier_low_wrst_pvals <- d.drug_sens_all_genes_expr_outlier_low %>%
+  ## remove cell lines that are high outliers (I think this makes sense... but I'm not sure)
+  filter(expr_outlier_flag != "high") %>%
+  group_by(target, compound_id) %>%
+  summarize(p_val = wilcox.test(dependency ~ expr_outlier_flag)$p.value)
+# d.drug_sens_all_genes_expr_outlier_low_wrst_sens_pvals
+
+## adjust for multiple testing overall
+d.stats <- BH_adjust(d.drug_sens_all_genes_expr_outlier_low_wrst_pvals)
+# d.stats
+
+d.drug_sens_all_genes_expr_outlier_low_wrst <- d.drug_sens_all_genes_expr_outlier_low %>%
+  left_join(d.stats, by = c("target", "compound_id")) 
+
+d.drug_sens_all_genes_expr_outlier_low_wrst_sens <- d.drug_sens_all_genes_expr_outlier_low_wrst %>%
+  filter(grp_med_diff < 0)
+
+d.drug_sens_all_genes_expr_outlier_low_wrst_resist <- d.drug_sens_all_genes_expr_outlier_low_wrst %>%
+  filter(grp_med_diff > 0)
+
+
+# d.drug_sens_all_genes_expr_outlier_low_wrst_resist
+
+## high outliers and drug sensitivity
+d.drug_sens_all_genes_expr_outlier_high_wrst_sens_pvals <- d.drug_sens_all_genes_expr_outlier_high %>%
+  ## remove cell lines that are high outliers (I think this makes sense... but I'm not sure)
+  filter(expr_outlier_flag != "low") %>%
+  group_by(target, compound_id) %>%
+  summarize(p_val = wilcox.test(dependency ~ expr_outlier_flag)$p.value)
+# d.drug_sens_all_genes_expr_outlier_high_wrst_sens_pvals
+
+## adjust for multiple testing overall
+d.stats <- BH_adjust(d.drug_sens_all_genes_expr_outlier_high_wrst_sens_pvals)
+# d.stats
+
+d.drug_sens_all_genes_expr_outlier_high_wrst <- d.drug_sens_all_genes_expr_outlier_high %>%
+  left_join(d.stats, by = c("target", "compound_id"))
+# d.drug_sens_all_genes_expr_outlier_high_wrst_sens
+
+## high outliers and drug sensitivity
+d.drug_sens_all_genes_expr_outlier_high_wrst_sens <- d.drug_sens_all_genes_expr_outlier_high_wrst %>%
+  ## remove cell lines that are high outliers (I think this makes sense... but I'm not sure)
+  filter(grp_med_diff < 0)
+
+d.drug_sens_all_genes_expr_outlier_high_wrst_resist <- d.drug_sens_all_genes_expr_outlier_high_wrst %>%
+  ## remove cell lines that are high outliers (I think this makes sense... but I'm not sure)
+  filter(grp_med_diff > 0)
+
+```
+
+```{r}
+
+## low outliers
+summarize_stats(d.drug_sens_all_genes_expr_outlier_low_wrst_sens)
+summarize_stats(d.drug_sens_all_genes_expr_outlier_low_wrst_resist)
+
+## high outliers
+summarize_stats(d.drug_sens_all_genes_expr_outlier_high_wrst_sens)
+summarize_stats(d.drug_sens_all_genes_expr_outlier_high_wrst_resist)
+
+```
+###### Plot outliers
+
+For deparsing variables to use in dplyr: https://cran.r-project.org/web/packages/dplyr/vignettes/programming.html
+```{r}
+
+# make_outlier_plot <- function(df, direction, col_name, stat_cutoff, plot_n){
+#   
+#   ## save col_name as a string for later use
+#   stat_name <- deparse(substitute(col_name))
+#   
+#   ## remove the first 2 characters of dataframe name
+#   df_name <- str_sub(deparse(substitute(df)), start = 3)
+# 
+#   d.plot <- df %>% 
+#     ungroup() %>%
+#     ##use {{}} to deparse variable name for use in dplyr functions
+#     filter({{col_name}} < stat_cutoff) %>%
+#     unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
+#     mutate("target_compound_label" = reorder(target_compound_label, {{col_name}}),
+#            "target" = reorder(target, {{col_name}})) #%>%
+#   
+#   if(plot_n == "all") {
+#     ## do nothing to the df
+#     ## save output file name
+#     file_name <- paste0(date, "_", df_name, "_", stat_name, "_L", stat_cutoff, "all.pdf")
+#   
+#   } else {
+#     plot_pairs <- d.plot %>%
+#       arrange({{col_name}}) %>%
+#       distinct(target_compound_label) %>%
+#       head(n = plot_n) %>%
+#       pull(target_compound_label)
+#         
+#     d.plot <- d.plot %>%
+#       filter(target_compound_label %in% plot_pairs)
+#     
+#     ## save output file name
+#     file_name <- paste0(date, "_", df_name, "_", stat_name, "_L", stat_cutoff, "_top", plot_n, ".pdf")
+#   }
+# 
+#   ## make df to label adjusted FDR/p-val for each plot
+#   d.label <- d.plot %>%
+#     group_by(target, compound_id) %>%
+#     mutate(y.position = (max(dependency) + 0.1*(max(dependency) - min(dependency)))) %>%
+#     dplyr::ungroup() %>%
+#     dplyr::select(target_compound_label, p_val, fdr, y.position) %>%
+#     distinct(target_compound_label, .keep_all = TRUE) %>%
+#     mutate(group1 = direction,
+#            group2 = "neither",
+#            p_val = scientific(p_val, 3),
+#            fdr = scientific(fdr, 3)) 
+#   d.label
+#   
+#   length <- d.plot %>%
+#     ungroup() %>%
+#     distinct(target_compound_label) %>%
+#     nrow()
+#     
+#   aspect_ratio <- 1
+#   n_rows <- 1
+#   n_cols <- 1
+#   n_pages <- ceiling(length/(n_rows*n_cols))
+#   
+#   ## make stat label for labeling significance brackets
+#   if(stat_name == "p_val"){
+#     tmp_label <- str_sub(stat_name, end = 1)
+#     stat_label <- paste0(toupper(tmp_label), " = ", "{", stat_name, "}")
+#   } else if (stat_name == "fdr"){
+#     stat_label <- paste0(toupper(stat_name), " = ", "{", stat_name, "}")
+#   } else{
+#     cat("\nPlease enter a valid statistic (p-value or FDR)")
+#   }
+#   
+#   # stat_label <- paste0(toupper(stat_name), " = ", "{", stat_name, "}")
+# 
+#   pdf(file.path(out_dir, file_name), width = 6, height = 3)
+#   for(i in 1:n_pages){
+#     p <-  ggplot(d.plot, aes(x = expr_outlier_flag, y = dependency)) +
+#       geom_hline(yintercept = 0) +
+#       geom_jitter(aes(color = expr_outlier_flag), width = 0.3) +
+#       geom_boxplot(alpha = 0) +
+#       stat_pvalue_manual(d.label, label = stat_label, tip.length = 0.03, size = 3, vjust = -0.5) +
+#       ## adds extra space on top & bottom so p-value label will fit
+#       scale_y_continuous(expand = expansion(mult = 0.15)) +
+#       scale_color_manual(values = c("low" = "blue", "neither" = "gray50", "high" = "red")) +
+#       labs(x = "Expression_group",
+#            y = "LFC_treated_vs_DMSO") +
+#       theme_bw() +
+#       theme(aspect.ratio = aspect_ratio,
+#             axis.text = element_text(color = "black"),
+#             axis.ticks = element_line(color = "black"),
+#             legend.position = "none") +
+#       facet_wrap_paginate(~target_compound_label, scales = "free_y",
+#                           nrow = n_rows, ncol = n_cols, page = i)
+# 
+#     q <- ggplot(d.plot, aes(x = target, y = log_tpm)) +
+#       geom_jitter(aes(color = expr_outlier_flag), width = 0.3) +
+#       geom_boxplot(alpha = 0) +
+#       scale_color_manual(values = c("low" = "blue", "neither" = "gray50", "high" = "red")) +
+#       labs(x = "Target", y = "log2(TPM)") +
+#       theme_bw() +
+#       theme(aspect.ratio = aspect_ratio,
+#             axis.text = element_text(color = "black"),
+#             axis.ticks = element_line(color = "black")) +
+#       facet_wrap_paginate(~target_compound_label, scale = "free",
+#                           nrow = n_rows, ncol = n_cols, page = i)
+#     print(ggarrange(p, q, ncol = 2, align = "hv", common.legend = TRUE, legend = "right"))
+#   }
+#   dev.off()
+#   
+# }
+
+
+```
+
+
+
+```{r}
+
+# make_outlier_plot(d.drug_sens_all_genes_expr_outlier_low_wrst_sens,
+#                   ## x-axis info
+#                   c("expr_outlier_flag", "target"), c("Expression_group", "Target"),
+#                   ## y-axis info
+#                   c("dependency", "log_tpm"), c("LFC_treated_vs_DMSO", "log2(TPM)"),
+#                   ## other information
+#                   "low", p_val, 0.05, 50)
+# 
+# make_outlier_plot(d.drug_sens_all_genes_expr_outlier_low_wrst_resist,
+#                   ## x-axis info
+#                   c("expr_outlier_flag", "target"), c("Expression_group", "Target"),
+#                   ## y-axis info
+#                   c("dependency", "log_tpm"), c("LFC_treated_vs_DMSO", "log2(TPM)"),
+#                   ## other information
+#                   "low", fdr, 0.1, 1)
+# 
+# make_outlier_plot(d.drug_sens_all_genes_expr_outlier_high_wrst_sens,
+#                   ## x-axis info
+#                   c("expr_outlier_flag", "target"), c("Expression_group", "Target"),
+#                   ## y-axis info
+#                   c("dependency", "log_tpm"), c("LFC_treated_vs_DMSO", "log2(TPM)"),
+#                   ## other information
+#                   "high", p_val, 0.05, 50)
+# 
+# make_outlier_plot(d.drug_sens_all_genes_expr_outlier_high_wrst_resist,
+#                   ## x-axis info
+#                   c("expr_outlier_flag", "target"), c("Expression_group", "Target"),
+#                   ## y-axis info
+#                   c("dependency", "log_tpm"), c("LFC_treated_vs_DMSO", "log2(TPM)"),
+#                   ## other information
+#                   "high", p_val, 0.05, 50)
+
+
+```
+
+```{r}
+
+# make_outlier_plot(d.drug_sens_all_genes_expr_outlier_low_wrst_sens, "low", p_val, 0.05, 50)
+# 
+# make_outlier_plot(d.drug_sens_all_genes_expr_outlier_low_wrst_resist, "low", p_val, 0.05, 50)
+# 
+# make_outlier_plot(d.drug_sens_all_genes_expr_outlier_high_wrst_sens, "high", p_val, 0.05, 50)
+# 
+# make_outlier_plot(d.drug_sens_all_genes_expr_outlier_high_wrst_resist, "high", p_val, 0.05, 50)
+
+```
+
+```{r}
+
+write_output_df <- function(df, col_name, stat_cutoff){
+  
+  df_out <- df %>%
+    filter({{col_name}} < stat_cutoff) %>%
+    arrange({{col_name}}) %>%
+    distinct(target, compound_id, .keep_all = TRUE) %>%
+    dplyr::select(target, compound_name, grp_med_diff, p_val, fdr)
+  
+  df_name <- deparse(substitute(df))
+  stat_name <- deparse(substitute(col_name))
+  
+  # df_name <- paste0(deparse(substitute(df)), "_",
+  #                   deparse(substitute(col_name)), "_",
+  #                   "L", stat_cutoff, ".txt")
+  # print(df_name)
+  # print(stat_name)
+  
+  # print(nrow(df_out))
+  
+  out_path <- file.path(out_dir, paste0(df_name, "_", stat_name, "_", "L", stat_cutoff, ".txt"))
+  # print(out_path)
+  
+  write_tsv(df_out, out_path)
+  
+  cat("\ndf written to", out_path)
+}
+
+
+```
+
+
+```{r}
+
+# write_output_df(d.drug_sens_all_genes_expr_outlier_low_wrst_sens, p_val, 0.05)
+# 
+# write_output_df(d.drug_sens_all_genes_expr_outlier_low_wrst_resist, p_val, 0.05)
+# 
+# write_output_df(d.drug_sens_all_genes_expr_outlier_high_wrst_sens, p_val, 0.05)
+# 
+# write_output_df(d.drug_sens_all_genes_expr_outlier_high_wrst_resist, p_val, 0.05)
+
+```
+
+
+##### Plot lineage
+
+
+```{r}
+
+# make_lineage_plot(d.drug_sens_all_genes_expr_outlier_low_wrst_sens, 
+#                   "lineage", "Cell_lineage", 
+#                   "log_tpm", "log2(TPM)",
+#                   p_val, 0.05, 50)
+# # 
+# make_lineage_plot(d.drug_sens_all_genes_expr_outlier_low_wrst_resist, 
+#                   "lineage", "Cell_lineage", 
+#                   "log_tpm", "log2(TPM)",
+#                   p_val, 0.05, 50)
+# # 
+# make_lineage_plot(d.drug_sens_all_genes_expr_outlier_high_wrst_sens, 
+#                   "lineage", "Cell_lineage", 
+#                   "log_tpm", "log2(TPM)",
+#                   p_val, 0.05, 50)
+# # 
+# make_lineage_plot(d.drug_sens_all_genes_expr_outlier_high_wrst_resist, 
+#                   "lineage", "Cell_lineage", 
+#                   "log_tpm", "log2(TPM)",
+#                   p_val, 0.05, 50)
+
+```
+
+
+
+## Paralogs
+
+### To Do 
+
+* get rid of unnecessary outlier code
+* do paralog analysis
+* consider whether drugs are double- or single-targeting when analyzing data
+* remove comments from paralog plot functions
+* add extra space to the top of lm plots (the expansion thing) to fit r^2 and FDR?
+* pull out significant paralog pairs that are in pgPEN
+* combine stats into one DF to compare directly
+
+
+### Phase 1 drug sensitivity
+
+```{r}
+
+## add target col so single-gene functions will work
+d.DeKegel_top5_pairs_drug_sens_expr <- d.DeKegel_top5_pairs_drug_sens_expr %>%
+  mutate(target = sorted_gene_pair)
+d.DeKegel_top5_pairs_drug_sens_expr
+
+```
+
+#### Continuous/linear regression
+
+```{r}
+
+## running lm for each sorted_gene_pair/compound_id group
+
+## combined expr
+## use broom::glance to get rsquared and pval
+d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_summary <- d.DeKegel_top5_pairs_drug_sens_expr %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(combined_log_tpm)) %>%
+  group_by(target, compound_id) %>%
+  group_modify(~ broom::glance(lm(dependency ~ combined_log_tpm, data = .x))) %>%
+  dplyr::ungroup() %>%
+  rename(r_squared = r.squared, p_val = p.value)
+# d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_summary
+
+## FDR-adjust p-vals for multiple testing and add back to summary DF
+d.stats <- BH_adjust(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_summary)
+# d.stats
+
+d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_summary <- d.stats %>%
+  dplyr::select(-p_val) %>%
+  right_join(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_summary, by = c("target", "compound_id")) %>%
+  dplyr::select(target, compound_id, r_squared, p_val, fdr)
+# d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_summary
+
+## use broom::tidy to get slope
+## it's definitely redundant to run the lm twice but I can't figure out how to 
+## get it to work otherwise, because group_modify expects a DF output
+d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_slope <- d.DeKegel_top5_pairs_drug_sens_expr %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(combined_log_tpm)) %>%
+  group_by(target, compound_id) %>%
+  group_modify(~ broom::tidy(lm(dependency ~ combined_log_tpm, data = .x))) %>%
+  dplyr::ungroup() %>%
+  ## extract slope of lm fit line from output
+  filter(term == "combined_log_tpm") %>%
+  rename(slope = estimate) %>%
+  dplyr::select(target, compound_id, slope) 
+# d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_slope
+
+## add rsquared, p-val, fdr, and slope info to main DF
+d.DeKegel_top5_pairs_drug_sens_combined_expr_lm <- d.DeKegel_top5_pairs_drug_sens_expr %>%
+  left_join(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_summary, by = c("target", "compound_id")) %>%
+  left_join(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_slope, by = c("target", "compound_id")) %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(combined_log_tpm))
+
+summarize_stats(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm)
+
+```
+
+```{r}
+
+## A1 expr
+
+## use broom::glance to get rsquared and pval
+d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_summary <- d.DeKegel_top5_pairs_drug_sens_expr %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(A1_log_tpm)) %>%
+  group_by(target, compound_id) %>%
+  group_modify(~ broom::glance(lm(dependency ~ A1_log_tpm, data = .x))) %>%
+  dplyr::ungroup() %>%
+  rename(r_squared = r.squared, p_val = p.value)
+# d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_summary
+
+## FDR-adjust p-vals for multiple testing and add back to summary DF
+d.stats <- BH_adjust(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_summary)
+# d.stats
+
+d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_summary <- d.stats %>%
+  dplyr::select(-p_val) %>%
+  right_join(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_summary, by = c("target", "compound_id")) %>%
+  dplyr::select(target, compound_id, r_squared, p_val, fdr)
+# d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_summary
+
+## use broom::tidy to get slope
+## it's definitely redundant to run the lm twice but I can't figure out how to 
+## get it to work otherwise, because group_modify expects a DF output
+d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_slope <- d.DeKegel_top5_pairs_drug_sens_expr %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(A1_log_tpm)) %>%
+  group_by(target, compound_id) %>%
+  group_modify(~ broom::tidy(lm(dependency ~ A1_log_tpm, data = .x))) %>%
+  dplyr::ungroup() %>%
+  ## extract slope of lm fit line from output
+  filter(term == "A1_log_tpm") %>%
+  rename(slope = estimate) %>%
+  dplyr::select(target, compound_id, slope) 
+# d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_slope
+
+## add rsquared, p-val, fdr, and slope info to main DF
+d.DeKegel_top5_pairs_drug_sens_A1_expr_lm <- d.DeKegel_top5_pairs_drug_sens_expr %>%
+  left_join(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_summary, by = c("target", "compound_id")) %>%
+  left_join(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_slope, by = c("target", "compound_id")) %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(A1_log_tpm))
+
+summarize_stats(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm)
+
+```
+
+```{r}
+
+## A2 expr
+
+## use broom::glance to get rsquared and pval
+d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_summary <- d.DeKegel_top5_pairs_drug_sens_expr %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(A2_log_tpm)) %>%
+  group_by(target, compound_id) %>%
+  group_modify(~ broom::glance(lm(dependency ~ A2_log_tpm, data = .x))) %>%
+  dplyr::ungroup() %>%
+  rename(r_squared = r.squared, p_val = p.value)
+# d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_summary
+
+## FDR-adjust p-vals for multiple testing and add back to summary DF
+d.stats <- BH_adjust(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_summary)
+# d.stats
+
+d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_summary <- d.stats %>%
+  dplyr::select(-p_val) %>%
+  right_join(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_summary, by = c("target", "compound_id")) %>%
+  dplyr::select(target, compound_id, r_squared, p_val, fdr)
+# d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_summary
+
+## use broom::tidy to get slope
+## it's definitely redundant to run the lm twice but I can't figure out how to 
+## get it to work otherwise, because group_modify expects a DF output
+d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_slope <- d.DeKegel_top5_pairs_drug_sens_expr %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(A2_log_tpm)) %>%
+  group_by(target, compound_id) %>%
+  group_modify(~ broom::tidy(lm(dependency ~ A2_log_tpm, data = .x))) %>%
+  dplyr::ungroup() %>%
+  ## extract slope of lm fit line from output
+  filter(term == "A2_log_tpm") %>%
+  rename(slope = estimate) %>%
+  dplyr::select(target, compound_id, slope) 
+# d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_slope
+
+## add rsquared, p-val, fdr, and slope info to main DF
+d.DeKegel_top5_pairs_drug_sens_A2_expr_lm <- d.DeKegel_top5_pairs_drug_sens_expr %>%
+  left_join(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_summary, by = c("target", "compound_id")) %>%
+  left_join(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_slope, by = c("target", "compound_id")) %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(A2_log_tpm))
+
+summarize_stats(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm)
+
+```
+
+
+
+```{r}
+
+## number of pairs with negative vs. positive slope
+d.DeKegel_top5_pairs_drug_sens_combined_expr_lm %>%
+  distinct(target, compound_id, .keep_all = TRUE) %>%
+  mutate(slope_flag = ifelse(slope < 0, "negative", "positive")) %>%
+  group_by(slope_flag) %>%
+  summarize(n = n())
+
+d.DeKegel_top5_pairs_drug_sens_A1_expr_lm %>%
+  distinct(target, compound_id, .keep_all = TRUE) %>%
+  mutate(slope_flag = ifelse(slope < 0, "negative", "positive")) %>%
+  group_by(slope_flag) %>%
+  summarize(n = n())
+
+d.DeKegel_top5_pairs_drug_sens_A2_expr_lm %>%
+  distinct(target, compound_id, .keep_all = TRUE) %>%
+  mutate(slope_flag = ifelse(slope < 0, "negative", "positive")) %>%
+  group_by(slope_flag) %>%
+  summarize(n = n())
+
+```
+
+
+```{r}
+
+## get low expression = low LFC pairs (positive slope)
+d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_pos_slope <-d.DeKegel_top5_pairs_drug_sens_combined_expr_lm %>%
+  filter(slope > 0)
+summarize_stats(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_pos_slope)
+
+## get high expression = low LFC pairs (negative slope)
+d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_neg_slope <- d.DeKegel_top5_pairs_drug_sens_combined_expr_lm %>%
+  filter(slope < 0)
+summarize_stats(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_neg_slope)
+
+## get low expression = low LFC pairs (positive slope)
+d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_pos_slope <-d.DeKegel_top5_pairs_drug_sens_A1_expr_lm %>%
+  filter(slope > 0)
+summarize_stats(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_pos_slope)
+
+## get high expression = low LFC pairs (negative slope)
+d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_neg_slope <- d.DeKegel_top5_pairs_drug_sens_A1_expr_lm %>%
+  filter(slope < 0)
+summarize_stats(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_neg_slope)
+
+## get low expression = low LFC pairs (positive slope)
+d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_pos_slope <-d.DeKegel_top5_pairs_drug_sens_A2_expr_lm %>%
+  filter(slope > 0)
+summarize_stats(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_pos_slope)
+
+## get high expression = low LFC pairs (negative slope)
+d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_neg_slope <- d.DeKegel_top5_pairs_drug_sens_A2_expr_lm %>%
+  filter(slope < 0)
+summarize_stats(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_neg_slope)
+
+```
+
+##### Plot
+```{r}
+## run make_lm_plot function
+
+d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_pos_slope %>%
+  filter(fdr < 0.1) %>%
+  distinct(sorted_gene_pair) %>%
+  nrow()
+
+d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_pos_slope %>%
+  filter(fdr < 0.1) %>%
+  distinct(sorted_gene_pair) %>%
+  nrow()
+
+# d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_pos_slope
+
+## positive slope scatterplots
+# make_paralog_lm_plot(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_pos_slope,
+#              combined_log_tpm, "log2(Combined_TPM)",
+#              dependency, "LFC_treated_vs_DMSO",
+#              fdr, 0.1, 50)
+# 
+# make_paralog_lm_plot(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_pos_slope,
+#              A1_log_tpm, "log2(A1_TPM)",
+#              dependency, "LFC_treated_vs_DMSO",
+#              fdr, 0.1, "all")
+# 
+# make_paralog_lm_plot(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_pos_slope,
+#              A2_log_tpm, "log2(A2_TPM)",
+#              dependency, "LFC_treated_vs_DMSO",
+#              fdr, 0.1, 50)
+
+## negative slope scatterplots
+# make_paralog_lm_plot(d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_neg_slope,
+#              combined_log_tpm, "log2(Combined_TPM)",
+#              dependency, "LFC_treated_vs_DMSO",
+#              fdr, 0.1, 50)
+# 
+# make_paralog_lm_plot(d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_neg_slope,
+#              A1_log_tpm, "log2(A1_TPM)",
+#              dependency, "LFC_treated_vs_DMSO",
+#              fdr, 0.1, 50)
+# 
+# make_paralog_lm_plot(d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_neg_slope,
+#              A2_log_tpm, "log2(A2_TPM)",
+#              dependency, "LFC_treated_vs_DMSO",
+#              fdr, 0.1, 50)
+
+```
+
 
 ```{r}
 
@@ -1892,10 +2060,10 @@ d.DeKegel_top5_pairs_drug_sens_expr %>%
 #   distinct(target, compound_id, .keep_all = TRUE) %>%
 #   dplyr::select(sorted_gene_pair, compound_name, grp_med_diff:fdr)
 # 
-# d.DeKegel_top5_pairs_drug_sens_expr_A2_lm_pos_top_outliers_wrst_sens %>%
-#   distinct(target, compound_id, .keep_all = TRUE) %>%
-#   dplyr::select(sorted_gene_pair, compound_name, grp_med_diff:fdr,
-#                 pgPEN_flag:drug_targets)
+d.DeKegel_top5_pairs_drug_sens_expr_A2_lm_pos_top_outliers_wrst_sens %>%
+  distinct(target, compound_id, .keep_all = TRUE) %>%
+  dplyr::select(sorted_gene_pair, compound_name, grp_med_diff:fdr,
+                pgPEN_flag:drug_targets)
 
 # d.DeKegel_top5_pairs_drug_sens_expr_A2_lm_pos_top_outliers %>%
 #   distinct(target, compound_id, .keep_all = TRUE)%>%
@@ -2123,4 +2291,440 @@ d.DeKegel_top5_pairs_drug_sens_expr_A2_lm_pos_top_outliers_wrst_sens_adjOutlierC
 ```
 
 
+
+#### Quartiles/WRST
+
+```{r}
+
+## bin combined expr for each pair into 4 quartiles
+d.DeKegel_top5_pairs_drug_sens_combined_expr_bin <- d.DeKegel_top5_pairs_drug_sens_expr %>%
+  group_by(sorted_gene_pair) %>%
+  mutate(combined_expr_bin = ntile(combined_log_tpm, n = 4)) %>%
+  ## factorized binned variable for easy plotting
+  mutate(combined_expr_bin = factor(combined_expr_bin, levels = c(1, 2, 3, 4)))
+
+## calculate the WRST p-value for bin 1 (lowest expr) vs. bin 4 (highest expr)
+d.DeKegel_top5_pairs_drug_sens_combined_expr_bin_pval_summary <- d.DeKegel_top5_pairs_drug_sens_combined_expr_bin %>%
+  filter(combined_expr_bin %in% c(1, 4)) %>%
+  group_by(sorted_gene_pair, compound_id) %>%
+  summarize("pval" = wilcox.test(dependency ~ combined_expr_bin, alternative = "less")$p.value)
+d.DeKegel_top5_pairs_drug_sens_combined_expr_bin_pval_summary
+
+## add p-values to main DF
+d.DeKegel_top5_pairs_drug_sens_combined_expr_bin_wrst <- left_join(d.DeKegel_top5_pairs_drug_sens_combined_expr_bin,
+                                                       d.DeKegel_top5_pairs_drug_sens_combined_expr_bin_pval_summary,
+                                            by = c("sorted_gene_pair", "compound_id")) %>%
+  ungroup()
+d.DeKegel_top5_pairs_drug_sens_combined_expr_bin_wrst
+
+
+```
+
+```{r}
+
+## FDR-adjust p-values
+pvals <- d.DeKegel_top5_pairs_drug_sens_combined_expr_bin_wrst %>%
+  distinct(sorted_gene_pair, compound_id, .keep_all = TRUE) %>%
+  arrange(pval) %>%
+  dplyr::select(pval) %>%
+  pull()
+
+fdr_vals <- p.adjust(pvals, method = "BH")
+head(fdr_vals)
+
+d.fdr_vals <- tibble(fdr = fdr_vals)
+
+d.fdr_vals %>%
+  filter(fdr < 0.05) %>%
+  nrow()
+
+d.fdr_vals %>%
+  filter(fdr < 0.1) %>%
+  nrow()
+
+d.pvals_labels <- d.DeKegel_top5_pairs_drug_sens_combined_expr_bin_wrst %>%
+  distinct(sorted_gene_pair, compound_id, .keep_all = TRUE) %>%
+  arrange(pval) %>%
+  dplyr::select(sorted_gene_pair, compound_id)
+d.pvals_labels
+
+d.fdr_vals_labeled <- d.pvals_labels %>%
+  add_column(d.fdr_vals)
+d.fdr_vals_labeled
+
+d.DeKegel_top5_pairs_drug_sens_combined_expr_bin_wrst <- d.DeKegel_top5_pairs_drug_sens_combined_expr_bin_wrst %>%
+  left_join(d.fdr_vals_labeled, by = c("sorted_gene_pair", "compound_id"))
+d.DeKegel_top5_pairs_drug_sens_combined_expr_bin_wrst
+
+```
+
+###### Plot
+Plotting FDR values from DF directly onto ggsignif(): 
+https://github.com/const-ae/ggsignif/issues/29
+https://cran.r-project.org/web/packages/ggsignif/ggsignif.pdf
+
+```{r}
+
+## plot all FDR < 0.1 pairs (sorted by FDR)
+## add my own labels!!
+
+d.plot <- d.DeKegel_top5_pairs_drug_sens_combined_expr_bin_wrst %>% 
+  ungroup() %>%
+  filter(fdr < 0.1) %>%
+  unite("gene_pair_compound_label", c("sorted_gene_pair", "compound_name"), sep = "\n", remove = FALSE) %>%
+  mutate("gene_pair_compound_label" = reorder(gene_pair_compound_label, fdr),
+         "sorted_gene_pair" = reorder(sorted_gene_pair, fdr))
+
+length <- d.plot %>%
+  ungroup() %>%
+  distinct(gene_pair_compound_label) %>%
+  nrow()
+
+# d.fdr_labels <- d.DeKegel_top5_combined_cn_drug_pair_fdr_signif %>%
+#   ungroup() %>%
+#   dplyr::select(gene_pair_compound_label, combined_cn_bin, fdr)
+  
+aspect_ratio <- 0.8
+n_rows <- 1
+n_cols <- 1
+n_pages <- ceiling(length/(n_rows*n_cols))
+
+# pdf(file.path(out_dir, paste(date, "DeKegel_top5_pairs_drug_sens_combined_expr_bin_wrst_fdr_L10.pdf", sep = "_")),
+#     width = 4, height = 2.5)
+# for(i in 1:n_pages){
+#   p <-  ggplot(d.plot, aes(x = combined_expr_bin, y = dependency, fill = combined_expr_bin)) +
+#     geom_hline(yintercept = 0) +
+#     geom_boxplot() +
+#     geom_signif(comparisons = list(c(1, 4)),
+#                 map_signif_level = FALSE,
+#                 test = "wilcox.test",
+#                 test.args = list(alternative = "less", p.adjust.method = "BH"),
+#                 # annotations = fdr_labels, # fix this to get FDR plotted direclty
+#                 textsize = 3.2) +
+#     # add_pvalue(d.fdr_labels) +
+#     ## adds 10% of space on top & bottom so p-value label will fit
+#     scale_y_continuous(expand = expansion(mult = 0.15)) +
+#     scale_fill_brewer(palette = "YlGnBu") +
+#     labs(x = "Combined_expr_bin",
+#          y = "LFC_treated_vs_DMSO") +
+#     theme_bw() +
+#     theme(aspect.ratio = aspect_ratio,
+#           axis.text = element_text(color = "black"),
+#           axis.ticks = element_line(color = "black"),
+#           legend.position = "none") +
+#     facet_wrap_paginate(~gene_pair_compound_label, scales = "free_y",
+#                         nrow = n_rows, ncol = n_cols, page = i)
+# 
+#   q <- ggplot(d.plot, aes(x = combined_expr_bin, y = combined_log_tpm, fill = combined_expr_bin)) +
+#     geom_boxplot() +
+#     ## adds 10% of space on top & bottom so p-value label will fit
+#     # scale_y_continuous(expand = expansion(mult = 0.15)) +
+#     scale_fill_brewer(palette = "YlGnBu") +
+#     labs(x = "Combined_expr_bin",
+#          y = "Combined_expr") +
+#     # coord_trans(y = "log2") +
+#     theme_bw() +
+#     theme(aspect.ratio = aspect_ratio,
+#           axis.text = element_text(color = "black"),
+#           axis.ticks = element_line(color = "black"),
+#           legend.position = "none") +
+#     facet_wrap_paginate(~gene_pair_compound_label, scales = "free_y",
+#                         nrow = n_rows, ncol = n_cols, page = i)
+#   print(ggarrange(p, q, ncol = 2, align = "hv"))
+# }
+# dev.off()
+
+```
+
+
+
+
+# Retire
+
+#### Single-gene quartiles/WRST
+```{r}
+
+## bin combined expr for each pair into 4 quartiles
+d.drug_sens_all_genes_expr_bin <- d.drug_sens_all_genes_expr %>%
+  filter(!is.na(log_tpm)) %>%
+  filter(!is.na(dependency)) %>%
+  group_by(target, compound_id) %>% # is this correct?
+  mutate(log_tpm_bin = ntile(log_tpm, n = 4)) %>%
+  ## factorized binned variable for easy plotting
+  mutate(log_tpm_bin = factor(log_tpm_bin, levels = c(1, 2, 3, 4)))
+
+## calculate the WRST p-value for bin 1 (lowest expr) vs. bin 4 (highest expr)
+d.drug_sens_all_genes_expr_bin_pval_summary <- d.drug_sens_all_genes_expr_bin %>%
+  filter(log_tpm_bin %in% c(1, 4)) %>%
+  group_by(target, compound_id) %>%
+  summarize("p_val" = wilcox.test(dependency ~ log_tpm_bin)$p.value)
+d.drug_sens_all_genes_expr_bin_pval_summary
+
+## B-H adjust p-values
+d.stats <- BH_adjust(d.drug_sens_all_genes_expr_bin_pval_summary)
+
+## add p-values to main DF
+d.drug_sens_all_genes_expr_bin_wrst <- d.drug_sens_all_genes_expr_bin %>%
+  left_join(d.stats, by = c("target", "compound_id"))
+d.drug_sens_all_genes_expr_bin_wrst
+
+summarize_stats(d.drug_sens_all_genes_expr_bin_wrst)
+
+```
+
+
+##### Plot
+
+Plotting FDR values from DF directly onto ggsignif(): 
+https://github.com/const-ae/ggsignif/issues/29
+https://cran.r-project.org/web/packages/ggsignif/ggsignif.pdf
+
+```{r}
+
+make_binned_plot <- function(df, col_name, stat_cutoff){
+  
+  print(deparse(substitute(df)))
+  print(deparse(substitute(col_name)))
+  print(stat_cutoff)
+  
+  ## save col_name as a string for later use
+  stat_name <- deparse(substitute(col_name))
+
+  d.plot <- df %>% 
+    ungroup() %>%
+    ##use {{}} to deparse variable name for use in dplyr functions
+    filter({{col_name}} < stat_cutoff) %>%
+    unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
+    mutate("target_compound_label" = reorder(target_compound_label, {{col_name}}),
+           "target" = reorder(target, {{col_name}})) #%>%
+  
+  d.plot
+
+  ## make df to label adjusted FDR/p-val for each plot
+  d.label <- d.plot %>%
+    group_by(target, compound_id) %>%
+    mutate(y.position = (max(dependency) + 0.1*(max(dependency) - min(dependency)))) %>%
+    dplyr::ungroup() %>%
+    dplyr::select(target_compound_label, p_val, fdr, y.position) %>%
+    distinct(target_compound_label, .keep_all = TRUE) %>%
+    mutate(group1 = 1,
+           group2 = 4,
+           p_val = scientific(p_val, 3),
+           fdr = scientific(fdr, 3)) 
+  d.label
+  
+  length <- d.plot %>%
+    ungroup() %>%
+    distinct(target_compound_label) %>%
+    nrow()
+    
+  aspect_ratio <- 1
+  n_rows <- 1
+  n_cols <- 1
+  n_pages <- ceiling(length/(n_rows*n_cols))
+  
+  ## make stat label for labeling significance brackets
+  stat_label <- paste0(toupper(stat_name), " = ", "{", stat_name, "}")
+
+  ## remove the first 2 characters of dataframe name
+  df_name <- str_sub(deparse(substitute(df)), start = 3)
+
+  ## save output file name
+  file_name <- paste(date, df_name, stat_name, "L", stat_cutoff, ".pdf", sep = "_")
+
+  pdf(file.path(out_dir, file_name), width = 6, height = 3)
+  for(i in 1:n_pages){
+    p <-  ggplot(d.plot, aes(x = log_tpm_bin, y = dependency, fill = log_tpm_bin)) +
+      geom_hline(yintercept = 0) +
+      geom_boxplot() +
+      stat_pvalue_manual(d.label, label = stat_label, tip.length = 0.03, size = 3, vjust = -0.5) +
+      ## adds extra space on top & bottom so p-value label will fit
+      scale_y_continuous(expand = expansion(mult = 0.15)) +
+      scale_fill_brewer(palette = "YlGnBu") +
+      labs(x = "Expression_bin",
+           y = "LFC_treated_vs_DMSO") +
+      theme_bw() +
+      theme(aspect.ratio = aspect_ratio,
+            axis.text = element_text(color = "black"),
+            axis.ticks = element_line(color = "black"),
+            legend.position = "none") +
+      facet_wrap_paginate(~target_compound_label, scales = "free_y",
+                          nrow = n_rows, ncol = n_cols, page = i)
+
+    q <- ggplot(d.plot, aes(x = log_tpm_bin, y = log_tpm, fill = log_tpm_bin)) +
+      geom_boxplot() +
+      scale_fill_brewer(palette = "YlGnBu") + 
+      labs(x = "Expression_bin", y = "log2(TPM)") +
+      theme_bw() +
+      theme(aspect.ratio = aspect_ratio,
+            axis.text = element_text(color = "black"),
+            axis.ticks = element_line(color = "black"),
+            legend.position = "none") +
+      facet_wrap_paginate(~target_compound_label, scale = "free",
+                          nrow = n_rows, ncol = n_cols, page = i)
+    print(ggarrange(p, q, ncol = 2, align = "hv"))
+  }
+  dev.off()
+  
+}
+
+
+```
+
+```{r}
+
+d.drug_sens_all_genes_expr_bin_wrst %>%
+  distinct(target, compound_id, .keep_all = TRUE) %>%
+  filter(fdr < 0.0001) %>%
+  nrow()
+
+d.drug_sens_all_genes_expr_bin_wrst %>%
+  filter(fdr < 0.0001)
+
+# make_binned_plot(d.drug_sens_all_genes_expr_bin_wrst, fdr, 0.0001)
+
+```
+
+
+```{r}
+
+## plot all FDR < 0.1 pairs (sorted by FDR)
+## add my own labels!!
+
+d.plot <- d.drug_sens_all_genes_expr_bin_wrst %>% 
+  ungroup() %>%
+  filter(fdr < 0.0001) %>%
+  unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
+  mutate("target_compound_label" = reorder(target_compound_label, fdr),
+         "target" = reorder(target, fdr))
+
+length <- d.plot %>%
+  ungroup() %>%
+  distinct(target_compound_label) %>%
+  nrow()
+
+# d.fdr_labels <- d.DeKegel_top5_combined_expr_drug_pair_fdr_signif %>%
+#   ungroup() %>%
+#   dplyr::select(gene_pair_compound_label, combined_expr_bin, fdr)
+  
+aspect_ratio <- 0.8
+n_rows <- 1
+n_cols <- 1
+n_pages <- ceiling(length/(n_rows*n_cols))
+
+# pdf(file.path(out_dir, paste(date, "drug_sens_all_genes_expr_bin_wrst_fdr_L0.0001.pdf", sep = "_")),
+#     width = 4, height = 2.5)
+# for(i in 1:n_pages){
+#   p <-  ggplot(d.plot, aes(x = log_tpm_bin, y = dependency, fill = log_tpm_bin)) +
+#     geom_hline(yintercept = 0) +
+#     geom_boxplot() +
+#     geom_signif(comparisons = list(c(1, 4)),
+#                 map_signif_level = FALSE,
+#                 test = "wilcox.test",
+#                 # test.args = list(alternative = "less", p.adjust.method = "BH"),
+#                 # annotations = fdr_labels, # fix this to get FDR plotted direclty
+#                 textsize = 3.2) +
+#     # add_pvalue(d.fdr_labels) +
+#     ## adds 10% of space on top & bottom so p-value label will fit
+#     scale_y_continuous(expand = expansion(mult = 0.15)) +
+#     scale_fill_brewer(palette = "YlGnBu") +
+#     labs(x = "Expression_bin",
+#          y = "LFC_treated_vs_DMSO") +
+#     theme_bw() +
+#     theme(aspect.ratio = aspect_ratio,
+#           axis.text = element_text(color = "black"),
+#           axis.ticks = element_line(color = "black"),
+#           legend.position = "none") +
+#     facet_wrap_paginate(~target_compound_label, scales = "free_y",
+#                         nrow = n_rows, ncol = n_cols, page = i)
+# 
+#   q <- ggplot(d.plot, aes(x = log_tpm_bin, y = log_tpm, fill = log_tpm_bin)) +
+#     geom_boxplot() +
+#     ## adds 10% of space on top & bottom so p-value label will fit
+#     # scale_y_continuous(expand = expansion(mult = 0.15)) +
+#     scale_fill_brewer(palette = "YlGnBu") +
+#     labs(x = "Expression_bin",
+#          y = "log2(TPM)") +
+#     theme_bw() +
+#     theme(aspect.ratio = aspect_ratio,
+#           axis.text = element_text(color = "black"),
+#           axis.ticks = element_line(color = "black"),
+#           legend.position = "none") +
+#     facet_wrap_paginate(~target_compound_label, scales = "free_y",
+#                         nrow = n_rows, ncol = n_cols, page = i)
+#   print(ggarrange(p, q, ncol = 2, align = "hv"))
+# }
+# dev.off()
+
+```
+
+
+```{r}
+
+# ## filter DF for only pairs that I want to plot
+# d.drug_plot <- d.drug_sens_all_genes_expr_lm %>% 
+#   ungroup() %>%
+#   filter(fdr < 0.001) %>%
+#   # mutate(cn = 2^log_copy_number) %>%
+#   filter(!is.na(dependency)) %>%
+#   filter(!is.na(log_tpm)) %>%
+#   unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>%
+#   mutate("target_compound_label" = reorder(target_compound_label, fdr),
+#          "target" = reorder(target, fdr))
+# 
+# ## set length of DF to plot
+# length <- d.drug_plot %>%
+#   ungroup() %>%
+#   distinct(target_compound_label) %>%
+#   nrow()
+# 
+# ## make df to label rsquared and pvalue for each plot
+# d.label <- d.drug_plot %>%
+#   group_by(target, compound_id) %>%
+#   mutate(group_label_x = min(log_tpm),
+#          group_label_y = max(dependency)) %>%
+#   dplyr::ungroup() %>%
+#   dplyr::select(target_compound_label, r_squared, fdr, group_label_x, group_label_y) %>%
+#   distinct(target_compound_label, .keep_all = TRUE) %>%
+#   mutate(r_squared = round(r_squared, 3),
+#          fdr = scientific(fdr, 3)) 
+# d.label
+# 
+# ## make df to plot CN for each paralog
+# # d.cn_plot <- d.drug_plot %>%
+# #   dplyr::select(target_compound_label, log_copy_number) 
+# 
+# aspect_ratio <- 1
+# n_rows <- 1
+# n_cols <- 1
+# n_pages <- ceiling(length/(n_rows*n_cols))
+
+# pdf(file.path(out_dir, paste(date, "drug_sens_all_genes_expr_lm_fdr_L0.001.pdf", sep = "_")),
+#     width = 4, height = 3)
+# for(i in 1:n_pages){
+#   p <-  ggplot(d.drug_plot, aes(x = log_tpm, y = dependency)) +
+#     geom_hline(yintercept = 0) +
+#     geom_point(size = 1) +
+#     geom_smooth(method = lm, se = FALSE, color = "gray60") +
+#     geom_richtext(data = d.label,
+#                   aes(x = group_label_x, y = group_label_y,
+#                   ## this package can do HTML-formatting for text
+#                   label = paste0("r<sup>2</sup>=", r_squared, "<br>FDR=", fdr)),
+#                   ## adjust label alignment and remove borders
+#                   hjust = 0, vjust = 1, label.color = NA, size = 3,
+#                   ## label background = transparent, text is not
+#                   fill = alpha(c("white"), 0.75)) +
+#     labs(x = "log2(TPM)",
+#          y = "LFC_treated_vs_DMSO") +
+#     theme_bw() +
+#     theme(aspect.ratio = aspect_ratio,
+#           axis.text = element_text(color = "black"),
+#           axis.ticks = element_line(color = "black")) +
+#     facet_wrap_paginate(~target_compound_label, scales = "free",
+#                         nrow = n_rows, ncol = n_cols, page = i)
+#   print(ggarrange(p, ncol = 1, align = "hv"))
+# }
+# dev.off()
+
+```
 
