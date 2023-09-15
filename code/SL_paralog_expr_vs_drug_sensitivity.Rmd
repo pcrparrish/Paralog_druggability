@@ -143,7 +143,6 @@ d.drug_sens_all_genes_expr_lm <- d.drug_sens_all_genes_expr %>%
 summarize_stats(d.drug_sens_all_genes_expr_lm)
 
 ```
-It's definitely redundant to run the lm twice but I can't figure out how to get it to work otherwise, because group_modify expects a DF output. 
 
 
 
@@ -1195,8 +1194,7 @@ d.DeKegel_top5_pairs_drug_sens_expr
 # # d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_summary
 # 
 # ## use broom::tidy to get slope
-# ## it's definitely redundant to run the lm twice but I can't figure out how to 
-# ## get it to work otherwise, because group_modify expects a DF output
+# ## note: group_modify expects a DF output
 # d.DeKegel_top5_pairs_drug_sens_combined_expr_lm_slope <- d.DeKegel_top5_pairs_drug_sens_expr %>%
 #   filter(!is.na(dependency)) %>%
 #   filter(!is.na(combined_log_tpm)) %>%
@@ -1245,8 +1243,7 @@ d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_summary <- d.stats %>%
 # d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_summary
 
 ## use broom::tidy to get slope
-## it's definitely redundant to run the lm twice but I can't figure out how to 
-## get it to work otherwise, because group_modify expects a DF output
+## note: group_modify expects a DF output
 d.DeKegel_top5_pairs_drug_sens_A1_expr_lm_slope <- d.DeKegel_top5_pairs_drug_sens_expr %>%
   filter(!is.na(dependency)) %>%
   filter(!is.na(A1_log_tpm)) %>%
@@ -1295,8 +1292,7 @@ d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_summary <- d.stats %>%
 # d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_summary
 
 ## use broom::tidy to get slope
-## it's definitely redundant to run the lm twice but I can't figure out how to 
-## get it to work otherwise, because group_modify expects a DF output
+## note: group_modify expects a DF output
 d.DeKegel_top5_pairs_drug_sens_A2_expr_lm_slope <- d.DeKegel_top5_pairs_drug_sens_expr %>%
   filter(!is.na(dependency)) %>%
   filter(!is.na(A2_log_tpm)) %>%
