@@ -95,6 +95,7 @@ ggplot(d.AKT3_expr_outlier_top_hit_withCN, aes(x = A2_log_tpm, y = AKT3_log_cn, 
             axis.ticks = element_line(color = "black"))
 
 ```
+
 It doesn't look like there is a correlation between low copy number and low expression for *AKT3*. 
 
 ## Mutations in PI3K/Akt pathway genes
