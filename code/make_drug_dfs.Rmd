@@ -149,7 +149,7 @@ d.Broad_drug_info_DeKegel_top5 <- d.Broad_drug_info %>%
 ## also adds drug annotations
 d.drug_sens_DeKegel_top5 <- drug_sensitivity %>%
   inner_join(d.Broad_drug_info_DeKegel_top5, by = c("compound" = "column_name"))
-head(d.drug_sens_DeKegel_top5)
+# head(d.drug_sens_DeKegel_top5)
 
 ## reformat cell line metadata and add to filtered drug sensitivity DF
 d.drug_sens_DeKegel_top5 <- metadata %>%

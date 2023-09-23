@@ -1,7 +1,7 @@
 ---
-title: "AKT3_expr_covariate_analysis"
+title: "AKT3 expression covariate analysis"
 author: "Phoebe Parrish"
-date: "2/24/2022"
+date: "2023-09-20"
 output: html_document
 ---
 
@@ -31,17 +31,13 @@ library(DescTools) # for robust scaling
 
 date <- Sys.Date()
 
-## work laptop
-base_dir <- file.path("/Users", "pparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
-                      "01_Data", "Paralog_SL_meta_analysis")
+in_dir <- file.path("..", "input_data")
 
-## personal laptop
-# base_dir <- file.path("/Users", "phoebeparrish", "Google_Drive", "01_Research", "01_Projects", "01_Paralog_pgRNA",
-#                       "01_Data", "Paralog_SL_meta_analysis")
+df_dir <- file.path("..", "results", "integrated_dfs")
 
-in_dir <- file.path(base_dir, "01_input_files")
+expr_dir <- file.path("..", "results/expression_output")
 
-out_dir <- file.path(base_dir, "02_output_files")
+options(dplyr.summarise.inform = FALSE)
 
 
 ```
@@ -51,39 +47,40 @@ out_dir <- file.path(base_dir, "02_output_files")
 
 ```{r, message = FALSE}
 
-d.DeKegel_top5_pairs_drug_sens_expr_annot <- read_rds(file.path(out_dir, "d.DeKegel_top5_pairs_drug_sens_expr_annot"))
+d.DeKegel_top5_pairs_drug_sens_expr_annot <- read_rds(file.path(expr_dir, "d.top_outlier_pairs"))
 
-d.Broad_drug_info <- read_csv(file.path(in_dir, "primary-screen-replicate-collapsed-treatment-info.csv"))
-
-d.Broad_secondary_auc <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
-
-d.Broad_secondary_doses <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
-
-d.drug_sens_all_genes_expr <- read_rds(file.path(out_dir, "d.drug_sens_all_genes_expr"))
-
-# d.drug_sens_all_genes_drug_sens_cn_annot <- read_rds(file.path(out_dir, "d.drug_sens_all_genes_cn_annot"))
-
-d.DeKegel_top5_pairs_drug_sens_cn_annot <- read_rds(file.path(out_dir, "d.DeKegel_top5_pairs_drug_sens_cn_annot"))
-
-d.DeKegel_top5_pairs_drug_sens_expr_A2_lm_pos_top_outliers_wrst_sens_adjOutlierCutoff <- read_rds(file.path(out_dir, "d.DeKegel_top5_pairs_drug_sens_expr_A2_lm_pos_top_outliers_wrst_sens_adjOutlierCutoff"))
-
-d.mut_21Q2_DeKegel_top5 <- read_rds(file.path(out_dir, "d.mut_21Q2_DeKegel_top5"))
+# d.Broad_drug_info <- read_csv(file.path(in_dir, "primary-screen-replicate-collapsed-treatment-info.csv"))
+# 
+# d.Broad_secondary_auc <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
+# 
+# d.Broad_secondary_doses <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
+# 
+# d.drug_sens_all_genes_expr <- read_rds(file.path(out_dir, "d.drug_sens_all_genes_expr"))
+# 
+# # d.drug_sens_all_genes_drug_sens_cn_annot <- read_rds(file.path(out_dir, "d.drug_sens_all_genes_cn_annot"))
+# 
+d.DeKegel_top5_pairs_drug_sens_cn_annot <- read_rds(file.path(df_dir, "d.DeKegel_top5_pairs_drug_sens_cn_annot"))
+# 
+# d.DeKegel_top5_pairs_drug_sens_expr_A2_lm_pos_top_outliers_wrst_sens_adjOutlierCutoff <- read_rds(file.path(out_dir, "d.DeKegel_top5_pairs_drug_sens_expr_A2_lm_pos_top_outliers_wrst_sens_adjOutlierCutoff"))
+# 
+# d.mut_21Q2_DeKegel_top5 <- read_rds(file.path(out_dir, "d.mut_21Q2_DeKegel_top5"))
 
 d.PI3K_pathway <- read_tsv(file.path(in_dir, "PI3K_Akt_pathway.txt"))
 
-d.phase2_dose_response <- read_rds(file.path(out_dir, "d.phase2_dose_response_data"))
-
-d.Broad_drug_info <- read_csv(file.path(in_dir, "primary-screen-replicate-collapsed-treatment-info.csv"))
-
-d.phase2_auc <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
+# d.phase2_dose_response <- read_rds(file.path(out_dir, "d.phase2_dose_response_data"))
+# 
+# d.Broad_drug_info <- read_csv(file.path(in_dir, "primary-screen-replicate-collapsed-treatment-info.csv"))
+# 
+# d.phase2_auc <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
 
 ```
 # Analysis
 ## AKT3 expr covariates
 
+### CN vs. expression
 ```{r}
 
-d.AKT3_expr_outlier_top_hit <- d.DeKegel_top5_pairs_drug_sens_expr_A2_lm_pos_top_outliers_wrst_sens_adjOutlierCutoff %>%
+d.AKT3_expr_outlier_top_hit <- d.DeKegel_top5_pairs_drug_sens_expr_annot %>%
   filter(sorted_gene_pair == "AKT1_AKT3" & compound_name == "GSK2110183")
 d.AKT3_expr_outlier_top_hit
 
@@ -92,13 +89,13 @@ d.AKT3_expr_outlier_top_hit_withCN <- d.DeKegel_top5_pairs_drug_sens_cn_annot %>
   dplyr::select(depmap_id, A2_log_cn) %>%
   rename(AKT3_log_cn = A2_log_cn) %>%
   right_join(d.AKT3_expr_outlier_top_hit, by = "depmap_id")
-d.AKT3_expr_outlier_top_hit_withCN
+# d.AKT3_expr_outlier_top_hit_withCN
 
 ```
 
-```{r}
+```{r, warning = FALSE, message = FALSE}
 
-d.AKT3_expr_outlier_top_hit_withCN
+# d.AKT3_expr_outlier_top_hit_withCN
 
 ggplot(d.AKT3_expr_outlier_top_hit_withCN, aes(x = A2_log_tpm, y = AKT3_log_cn, color = A2_expr_outlier_flag)) +
   geom_hline(yintercept = 1) +
@@ -108,55 +105,34 @@ ggplot(d.AKT3_expr_outlier_top_hit_withCN, aes(x = A2_log_tpm, y = AKT3_log_cn, 
   theme(aspect.ratio = 1,
             axis.text = element_text(color = "black"),
             axis.ticks = element_line(color = "black"))
-  
-
 
 ```
+It doesn't look like there is a correlation between low copy number and low expression for *AKT3*. 
 
-```{R}
+### Mutations in PI3K/Akt pathway genes
+```{r, message=FALSE}
 
-## first time
-# eh <- ExperimentHub()
-# eh.depmap <- query(eh, "depmap")
-# 
-# mut_calls <- eh[["EH6121"]]
-# 
-# write_rds(mut_calls, file.path(out_dir, "d.mut_calls_21Q2"))
+## get DepMap mutation call information
+eh <- ExperimentHub()
+eh.depmap <- query(eh, "depmap")
 
-mut_calls <- read_rds(file.path(out_dir, "d.mut_calls_21Q2"))
+mut_calls <- eh[["EH6121"]]
 
 ```
 
 ```{r}
 
-
-mut_calls
-
-test_list <- c("AKT3")
-
-d.PI3K_pathway
-
 PI3K_pathway_genes <- d.PI3K_pathway %>%
   pull(gene_name)
-
-mut_calls %>%
-  filter(gene_name %in% test_list)
-
-mut_calls %>%
-  filter(gene_name == "AKT3")
 
 d.mut_calls_PI3K_pathway <- mut_calls %>%
   filter(gene_name %in% PI3K_pathway_genes) 
 
 d.mut_calls_PI3K_pathway %>%
   distinct(genome_change, .keep_all = TRUE) %>%
-  group_by(gene_name) %>%
-  summarize(n = n())
-
-d.mut_calls_PI3K_pathway %>%
-  distinct(genome_change, .keep_all = TRUE) %>%
-  group_by(gene_name, is_deleterious) %>%
-  summarize(n = n())
+  group_by(is_deleterious) %>%
+  summarize(n = n()) %>%
+  print_kbl()
 
 ## keep only deleterious mutations
 d.mut_calls_PI3K_pathway_deleterious <- d.mut_calls_PI3K_pathway %>%
@@ -166,8 +142,8 @@ d.mut_calls_PI3K_pathway_deleterious <- d.mut_calls_PI3K_pathway %>%
 
 ```{r}
 
-d.mut_calls_PI3K_pathway %>%
-  filter(gene_name == "PIK3CA")
+# d.mut_calls_PI3K_pathway %>%
+#   filter(gene_name == "PIK3CA")
 
 mut_calls_PI3K_pathway_tcga_hotspot <- d.mut_calls_PI3K_pathway %>%
   filter(is_tcga_hotspot == TRUE) %>%
@@ -226,7 +202,7 @@ d.AKT3_expr_outlier_top_hit_AKT_del_mut%>%
 
 ```
 
-```{r}
+```{r, fig.height=12}
 
 d.AKT3_expr_outlier_top_hit_AKT_del_mut
 
@@ -432,10 +408,6 @@ ggsave(file.path(out_dir, "AKT3_expr_vs_PI3K_pathway_tcga_hotspot_muts.png"), wi
 
 
 
-
-
-
-Think about mutation calls more - must be some way to look at mutations/types for each gene individually... 
 
 
 ## Phase 2 data

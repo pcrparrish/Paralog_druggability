@@ -1,4 +1,5 @@
 Welcome to the page where I'm hosting my knitted Rmd files.
 
 Links to Rmd output: 
-* [make_drug_dfs.Rmd](https://pcrparrish.github.io/Paralog_druggability/make_drug_dfs.html)
+1. [integrating drug sensitivity, expression, and copy number datasets](https://pcrparrish.github.io/Paralog_druggability/make_drug_dfs.html)
+2. [synthetic lethal paralogs vs. drug sensitivity](SL_paralog_expr_vs_drug_sensitivity.html)

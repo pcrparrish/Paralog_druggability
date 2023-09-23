@@ -1955,19 +1955,9 @@ d.drug_sens_DeKegel_top5 &lt;- drug_sensitivity %&gt;%
 <pre><code>##             &gt; matched rows       497,658</code></pre>
 <pre><code>##             &gt;                 ===========</code></pre>
 <pre><code>##             &gt; rows total         497,658</code></pre>
-<pre class="r"><code>head(d.drug_sens_DeKegel_top5)</code></pre>
-<pre><code>## # A tibble: 6 × 14
-##   depmap_id  cell_line  compound dependency broad_id name   dose screen_id moa  
-##   &lt;chr&gt;      &lt;chr&gt;      &lt;chr&gt;         &lt;dbl&gt; &lt;chr&gt;    &lt;chr&gt; &lt;dbl&gt; &lt;chr&gt;     &lt;chr&gt;
-## 1 ACH-000001 NIHOVCAR3… BRD-A04…     0.0587 BRD-A04… isop…   2.5 HTS       adre…
-## 2 ACH-000007 LS513_LAR… BRD-A04…     0.553  BRD-A04… isop…   2.5 HTS       adre…
-## 3 ACH-000008 A101D_SKIN BRD-A04…    -0.0493 BRD-A04… isop…   2.5 HTS       adre…
-## 4 ACH-000010 NCIH2077_… BRD-A04…     0.603  BRD-A04… isop…   2.5 HTS       adre…
-## 5 ACH-000011 253J_URIN… BRD-A04…     0.181  BRD-A04… isop…   2.5 HTS       adre…
-## 6 ACH-000012 HCC827_LU… BRD-A04…     0.576  BRD-A04… isop…   2.5 HTS       adre…
-## # … with 5 more variables: target &lt;chr&gt;, disease.area &lt;chr&gt;, indication &lt;chr&gt;,
-## #   smiles &lt;chr&gt;, phase &lt;chr&gt;</code></pre>
-<pre class="r"><code>## reformat cell line metadata and add to filtered drug sensitivity DF
+<pre class="r"><code># head(d.drug_sens_DeKegel_top5)
+
+## reformat cell line metadata and add to filtered drug sensitivity DF
 d.drug_sens_DeKegel_top5 &lt;- metadata %&gt;%
   dplyr::select(depmap_id, stripped_cell_line_name, primary_disease,
                 subtype_disease, lineage, lineage_subtype) %&gt;%
