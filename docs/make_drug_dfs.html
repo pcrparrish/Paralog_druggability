@@ -184,7 +184,7 @@ pre code {
 library(depmap)
 library(ExperimentHub)
 library(tidyverse)
-library(tidylog)
+# library(tidylog)
 library(kableExtra)</code></pre>
 <div id="assign-variables" class="section level2">
 <h2>Assign variables</h2>
@@ -1051,19 +1051,14 @@ TRUE
   dplyr::select(A1_entrez, A2_entrez) %&gt;%
   gather() %&gt;%
   distinct(value) %&gt;%
-  pull(value)</code></pre>
-<pre><code>## filter: removed 34,853 rows (95%), 1,795 rows remaining</code></pre>
-<pre><code>## gather: reorganized (A1_entrez, A2_entrez) into (key, value) [was 1795x2, now 3590x2]</code></pre>
-<pre><code>## distinct: removed 1,416 rows (39%), 2,174 rows remaining</code></pre>
-<pre class="r"><code>DeKegel_top5_genes_hgnc &lt;- d.DeKegel %&gt;%
+  pull(value)
+
+DeKegel_top5_genes_hgnc &lt;- d.DeKegel %&gt;%
   filter(prediction_percentile &lt; 5) %&gt;%
   dplyr::select(A1, A2) %&gt;%
   gather() %&gt;%
   distinct(value) %&gt;%
   pull(value)</code></pre>
-<pre><code>## filter: removed 34,853 rows (95%), 1,795 rows remaining</code></pre>
-<pre><code>## gather: reorganized (A1, A2) into (key, value) [was 1795x2, now 3590x2]</code></pre>
-<pre><code>## distinct: removed 1,416 rows (39%), 2,174 rows remaining</code></pre>
 <pre class="r"><code>d.expr_DeKegel_top5 &lt;- expr %&gt;%
   dplyr::filter(entrez_id %in% DeKegel_top5_genes_entrez)
 # d.expr_DeKegel_top5
@@ -1082,10 +1077,8 @@ d.cn_DeKegel_top5 &lt;- cn %&gt;%
 d.DeKegel_top5 &lt;- d.DeKegel %&gt;%
   filter(prediction_percentile &lt; 5) %&gt;%
   rename(A1_hgnc = A1, A2_hgnc = A2) %&gt;%
-  dplyr::select(prediction_rank:family_size)</code></pre>
-<pre><code>## filter: removed 34,853 rows (95%), 1,795 rows remaining</code></pre>
-<pre><code>## rename: renamed 2 variables (A1_hgnc, A2_hgnc)</code></pre>
-<pre class="r"><code>print_kbl(head(d.DeKegel_top5))</code></pre>
+  dplyr::select(prediction_rank:family_size)
+print_kbl(head(d.DeKegel_top5))</code></pre>
 <div style="border: 1px solid #ddd; padding: 5px; overflow-x: scroll; width:100%; ">
 <table class="table table-striped table-hover table-responsive" style="width: auto !important; ">
 <thead>
@@ -1532,9 +1525,8 @@ FALSE
 d.DeKegel_top5_genes &lt;- d.DeKegel_top5 %&gt;%
   pivot_longer(cols = starts_with(&quot;A&quot;),
                names_to = c(&quot;gene_pos&quot;, &quot;.value&quot;),
-               names_pattern = &quot;A(.)_(.*)&quot;)</code></pre>
-<pre><code>## pivot_longer: reorganized (A1_hgnc, A2_hgnc, A1_entrez, A2_entrez, A1_ensembl, …) into (gene_pos, hgnc, entrez, ensembl) [was 1795x20, now 3590x18]</code></pre>
-<pre class="r"><code>print_kbl(head(d.DeKegel_top5_genes))</code></pre>
+               names_pattern = &quot;A(.)_(.*)&quot;)
+print_kbl(head(d.DeKegel_top5_genes))</code></pre>
 <div style="border: 1px solid #ddd; padding: 5px; overflow-x: scroll; width:100%; ">
 <table class="table table-striped table-hover table-responsive" style="width: auto !important; ">
 <thead>
@@ -1948,14 +1940,8 @@ d.Broad_drug_info_DeKegel_top5 &lt;- d.Broad_drug_info %&gt;%
 ## filtering join to get drug sensitivity data only for drugs targeting top 5% genes
 ## also adds drug annotations
 d.drug_sens_DeKegel_top5 &lt;- drug_sensitivity %&gt;%
-  inner_join(d.Broad_drug_info_DeKegel_top5, by = c(&quot;compound&quot; = &quot;column_name&quot;))</code></pre>
-<pre><code>## inner_join: added 10 columns (broad_id, name, dose, screen_id, moa, …)</code></pre>
-<pre><code>##             &gt; rows only in x  (2,210,850)</code></pre>
-<pre><code>##             &gt; rows only in y  (        0)</code></pre>
-<pre><code>##             &gt; matched rows       497,658</code></pre>
-<pre><code>##             &gt;                 ===========</code></pre>
-<pre><code>##             &gt; rows total         497,658</code></pre>
-<pre class="r"><code># head(d.drug_sens_DeKegel_top5)
+  inner_join(d.Broad_drug_info_DeKegel_top5, by = c(&quot;compound&quot; = &quot;column_name&quot;))
+# head(d.drug_sens_DeKegel_top5)
 
 ## reformat cell line metadata and add to filtered drug sensitivity DF
 d.drug_sens_DeKegel_top5 &lt;- metadata %&gt;%
@@ -1965,15 +1951,8 @@ d.drug_sens_DeKegel_top5 &lt;- metadata %&gt;%
   dplyr::select(-c(cell_line, screen_id, disease.area:phase)) %&gt;%
   rename(cell_line = stripped_cell_line_name, 
          compound_name = name,
-         compound_id = compound) </code></pre>
-<pre><code>## right_join: added 13 columns (cell_line, compound, dependency, broad_id, name, …)</code></pre>
-<pre><code>##             &gt; rows only in x  (  1,236)</code></pre>
-<pre><code>##             &gt; rows only in y         0</code></pre>
-<pre><code>##             &gt; matched rows     497,658</code></pre>
-<pre><code>##             &gt;                 =========</code></pre>
-<pre><code>##             &gt; rows total       497,658</code></pre>
-<pre><code>## rename: renamed 3 variables (cell_line, compound_id, compound_name)</code></pre>
-<pre class="r"><code># d.drug_sens_DeKegel_top5
+         compound_id = compound) 
+# d.drug_sens_DeKegel_top5
 
 ## separate out DF so each target is on its own line
 d.drug_sens_DeKegel_top5_target &lt;- d.drug_sens_DeKegel_top5 %&gt;%
@@ -2276,14 +2255,8 @@ PIK3R2
 </div>
 <pre class="r"><code>## join DeKegel top 5% DF with filtered drug sensitivity DF
 d.DeKegel_top5_genes_drug_sens &lt;- d.drug_sens_DeKegel_top5_target &lt;- d.DeKegel_top5_genes %&gt;%
-  inner_join(d.drug_sens_DeKegel_top5_target, by = c(&quot;hgnc&quot; = &quot;target&quot;))</code></pre>
-<pre><code>## inner_join: added 12 columns (depmap_id, cell_line, primary_disease, subtype_disease, lineage, …)</code></pre>
-<pre><code>##             &gt; rows only in x  (    3,024)</code></pre>
-<pre><code>##             &gt; rows only in y  (1,441,532)</code></pre>
-<pre><code>##             &gt; matched rows     1,793,534    (includes duplicates)</code></pre>
-<pre><code>##             &gt;                 ===========</code></pre>
-<pre><code>##             &gt; rows total       1,793,534</code></pre>
-<pre class="r"><code># d.DeKegel_top5_genes_drug_sens</code></pre>
+  inner_join(d.drug_sens_DeKegel_top5_target, by = c(&quot;hgnc&quot; = &quot;target&quot;))
+# d.DeKegel_top5_genes_drug_sens</code></pre>
 </div>
 <div id="rm-double-targeting-drugs" class="section level4">
 <h4>Rm double-targeting drugs</h4>
@@ -2295,10 +2268,8 @@ d.DeKegel_top5_genes_drug_sens %&gt;%
   group_by(sorted_gene_pair, compound_id) %&gt;%
   summarize(n = n()) %&gt;%
   filter(n &gt;1)</code></pre>
-<pre><code>## distinct: removed 1,790,431 rows (&gt;99%), 3,103 rows remaining</code></pre>
-<pre><code>## group_by: 2 grouping variables (sorted_gene_pair, compound_id)</code></pre>
-<pre><code>## summarize: now 2,382 rows and 3 columns, one group variable remaining (sorted_gene_pair)</code></pre>
-<pre><code>## filter (grouped): removed 1,661 rows (70%), 721 rows remaining</code></pre>
+<pre><code>## `summarise()` has grouped output by &#39;sorted_gene_pair&#39;. You can override using
+## the `.groups` argument.</code></pre>
 <pre><code>## # A tibble: 721 × 3
 ## # Groups:   sorted_gene_pair [184]
 ##    sorted_gene_pair compound_id                           n
@@ -2323,20 +2294,14 @@ double_targeting_drugs &lt;- d.DeKegel_top5_genes_drug_sens %&gt;%
   unite(&quot;double_targeting_compounds&quot;, c(&quot;sorted_gene_pair&quot;, &quot;compound_id&quot;)) %&gt;%
   distinct(double_targeting_compounds) %&gt;%
   pull()</code></pre>
-<pre><code>## distinct: removed 1,790,431 rows (&gt;99%), 3,103 rows remaining</code></pre>
-<pre><code>## group_by: 2 grouping variables (sorted_gene_pair, compound_id)</code></pre>
-<pre><code>## summarize: now 2,382 rows and 3 columns, one group variable remaining (sorted_gene_pair)</code></pre>
-<pre><code>## filter (grouped): removed 1,661 rows (70%), 721 rows remaining</code></pre>
-<pre><code>## distinct: no rows removed</code></pre>
+<pre><code>## `summarise()` has grouped output by &#39;sorted_gene_pair&#39;. You can override using
+## the `.groups` argument.</code></pre>
 <pre class="r"><code>## how many double-targetings will be removed?
 d.DeKegel_top5_genes_drug_sens %&gt;%
   unite(&quot;gene_pair_compound&quot;, c(&quot;sorted_gene_pair&quot;, &quot;compound_id&quot;), remove = FALSE) %&gt;%
   mutate(double_targeting_drug = ifelse(gene_pair_compound %in% double_targeting_drugs, TRUE, FALSE)) %&gt;%
   group_by(double_targeting_drug) %&gt;%
   summarize(n = n())</code></pre>
-<pre><code>## mutate: new variable &#39;double_targeting_drug&#39; (logical) with 2 unique values and 0% NA</code></pre>
-<pre><code>## group_by: one grouping variable (double_targeting_drug)</code></pre>
-<pre><code>## summarize: now 2 rows and 2 columns, ungrouped</code></pre>
 <pre><code>## # A tibble: 2 × 2
 ##   double_targeting_drug      n
 ##   &lt;lgl&gt;                  &lt;int&gt;
@@ -2352,11 +2317,8 @@ d.DeKegel_top5_genes_drug_sens &lt;- d.DeKegel_top5_genes_drug_sens %&gt;%
     double_targeting_drug == TRUE &amp; gene_pos == &quot;2&quot; ~ TRUE,
     TRUE ~ FALSE)) %&gt;% # if the above is not true, flag = FALSE
   filter(rm_flag == FALSE) %&gt;%
-  dplyr::select(-c(&quot;gene_pair_compound&quot;, &quot;rm_flag&quot;))</code></pre>
-<pre><code>## mutate: new variable &#39;double_targeting_drug&#39; (logical) with 2 unique values and 0% NA</code></pre>
-<pre><code>## mutate: new variable &#39;rm_flag&#39; (logical) with 2 unique values and 0% NA</code></pre>
-<pre><code>## filter: removed 416,738 rows (23%), 1,376,796 rows remaining</code></pre>
-<pre class="r"><code># d.DeKegel_top5_genes_drug_sens
+  dplyr::select(-c(&quot;gene_pair_compound&quot;, &quot;rm_flag&quot;))
+# d.DeKegel_top5_genes_drug_sens
 # 1793534-(833476/2)</code></pre>
 </div>
 </div>
@@ -2373,9 +2335,8 @@ d.DeKegel_top5_genes_drug_sens &lt;- d.DeKegel_top5_genes_drug_sens %&gt;%
   separate(col = entrez_pair, c(&quot;A1_entrez&quot;, &quot;A2_entrez&quot;), remove = FALSE) %&gt;%
   separate(col = ensembl_pair, c(&quot;A1_ensembl&quot;, &quot;A2_ensembl&quot;), remove = FALSE) %&gt;%
   ## drop old gene ID columns
-  dplyr::select(-c(gene_pos:ensembl))</code></pre>
-<pre><code>## mutate: new variable &#39;drug_targets&#39; (character) with 3 unique values and 0% NA</code></pre>
-<pre class="r"><code>print_kbl(head(d.DeKegel_top5_pairs_drug_sens))</code></pre>
+  dplyr::select(-c(gene_pos:ensembl))
+print_kbl(head(d.DeKegel_top5_pairs_drug_sens))</code></pre>
 <div style="border: 1px solid #ddd; padding: 5px; overflow-x: scroll; width:100%; ">
 <table class="table table-striped table-hover table-responsive" style="width: auto !important; ">
 <thead>
@@ -3134,24 +3095,8 @@ d.DeKegel_top5_pairs_drug_sens_cn &lt;- d.DeKegel_top5_pairs_drug_sens %&gt;%
   rename(A2_log_cn = log_copy_number) %&gt;%
   ## remove rows that contain NAs
   filter(!is.na(A1_log_cn) | !is.na(A2_log_cn)) %&gt;%
-  filter(!is.na(dependency))</code></pre>
-<pre><code>## left_join: added one column (log_copy_number)</code></pre>
-<pre><code>##            &gt; rows only in x      16,674</code></pre>
-<pre><code>##            &gt; rows only in y  (3,583,785)</code></pre>
-<pre><code>##            &gt; matched rows     1,360,122</code></pre>
-<pre><code>##            &gt;                 ===========</code></pre>
-<pre><code>##            &gt; rows total       1,376,796</code></pre>
-<pre><code>## rename: renamed one variable (A1_log_cn)</code></pre>
-<pre><code>## left_join: added one column (log_copy_number)</code></pre>
-<pre><code>##            &gt; rows only in x      21,242</code></pre>
-<pre><code>##            &gt; rows only in y  (3,568,368)</code></pre>
-<pre><code>##            &gt; matched rows     1,355,554</code></pre>
-<pre><code>##            &gt;                 ===========</code></pre>
-<pre><code>##            &gt; rows total       1,376,796</code></pre>
-<pre><code>## rename: renamed one variable (A2_log_cn)</code></pre>
-<pre><code>## filter: removed 16,674 rows (1%), 1,360,122 rows remaining</code></pre>
-<pre><code>## filter: removed 33,868 rows (2%), 1,326,254 rows remaining</code></pre>
-<pre class="r"><code>print_kbl(head(d.DeKegel_top5_pairs_drug_sens_cn))</code></pre>
+  filter(!is.na(dependency))
+print_kbl(head(d.DeKegel_top5_pairs_drug_sens_cn))</code></pre>
 <div style="border: 1px solid #ddd; padding: 5px; overflow-x: scroll; width:100%; ">
 <table class="table table-striped table-hover table-responsive" style="width: auto !important; ">
 <thead>
@@ -3934,9 +3879,8 @@ A1
 <h3>Reformat DF</h3>
 <pre class="r"><code>## calculate combined CN for each pair
 d.DeKegel_top5_pairs_drug_sens_cn &lt;- d.DeKegel_top5_pairs_drug_sens_cn %&gt;%
-  mutate(combined_log_cn = log2((2^A1_log_cn) + (2^A2_log_cn)))</code></pre>
-<pre><code>## mutate: new variable &#39;combined_log_cn&#39; (double) with 150,919 unique values and &lt;1% NA</code></pre>
-<pre class="r"><code># d.DeKegel_top5_pairs_drug_sens_cn
+  mutate(combined_log_cn = log2((2^A1_log_cn) + (2^A2_log_cn)))
+# d.DeKegel_top5_pairs_drug_sens_cn
 
 ## reorganize columns
 d.DeKegel_top5_pairs_drug_sens_cn_annot &lt;- d.DeKegel_top5_pairs_drug_sens_cn %&gt;%
@@ -3972,24 +3916,8 @@ d.DeKegel_top5_pairs_drug_sens_expr &lt;- d.DeKegel_top5_pairs_drug_sens %&gt;%
   rename(A2_log_tpm = rna_expression) %&gt;%
   ## remove rows that contain NAs
   filter(!is.na(A1_log_tpm) | !is.na(A2_log_tpm)) %&gt;%
-  filter(!is.na(dependency))</code></pre>
-<pre><code>## left_join: added one column (rna_expression)</code></pre>
-<pre><code>##            &gt; rows only in x      23,820</code></pre>
-<pre><code>##            &gt; rows only in y  (2,862,601)</code></pre>
-<pre><code>##            &gt; matched rows     1,352,976</code></pre>
-<pre><code>##            &gt;                 ===========</code></pre>
-<pre><code>##            &gt; rows total       1,376,796</code></pre>
-<pre><code>## rename: renamed one variable (A1_log_tpm)</code></pre>
-<pre><code>## left_join: added one column (rna_expression)</code></pre>
-<pre><code>##            &gt; rows only in x      23,820</code></pre>
-<pre><code>##            &gt; rows only in y  (2,844,993)</code></pre>
-<pre><code>##            &gt; matched rows     1,352,976</code></pre>
-<pre><code>##            &gt;                 ===========</code></pre>
-<pre><code>##            &gt; rows total       1,376,796</code></pre>
-<pre><code>## rename: renamed one variable (A2_log_tpm)</code></pre>
-<pre><code>## filter: removed 23,820 rows (2%), 1,352,976 rows remaining</code></pre>
-<pre><code>## filter: removed 34,184 rows (3%), 1,318,792 rows remaining</code></pre>
-<pre class="r"><code>print_kbl(head(d.DeKegel_top5_pairs_drug_sens_expr))</code></pre>
+  filter(!is.na(dependency))
+print_kbl(head(d.DeKegel_top5_pairs_drug_sens_expr))</code></pre>
 <div style="border: 1px solid #ddd; padding: 5px; overflow-x: scroll; width:100%; ">
 <table class="table table-striped table-hover table-responsive" style="width: auto !important; ">
 <thead>
@@ -4772,9 +4700,8 @@ A1
 <h3>Reformat DF</h3>
 <pre class="r"><code>## calculate combined expr for each pair
 d.DeKegel_top5_pairs_drug_sens_expr &lt;- d.DeKegel_top5_pairs_drug_sens_expr %&gt;%
-  mutate(combined_log_tpm = log2((2^A1_log_tpm) + (2^A2_log_tpm)))</code></pre>
-<pre><code>## mutate: new variable &#39;combined_log_tpm&#39; (double) with 97,171 unique values and 0% NA</code></pre>
-<pre class="r"><code># d.DeKegel_top5_pairs_drug_sens_expr
+  mutate(combined_log_tpm = log2((2^A1_log_tpm) + (2^A2_log_tpm)))
+# d.DeKegel_top5_pairs_drug_sens_expr
 
 ## reorganize columns 
 d.DeKegel_top5_pairs_drug_sens_expr_annot &lt;- d.DeKegel_top5_pairs_drug_sens_expr %&gt;%
@@ -4798,14 +4725,8 @@ write_tsv(d.DeKegel_top5_pairs_drug_sens_expr_annot,
 # drug_sensitivity
 
 d.drug_sens_all_genes &lt;- drug_sensitivity %&gt;%
-  inner_join(d.Broad_drug_info, by = c(&quot;compound&quot; = &quot;column_name&quot;))</code></pre>
-<pre><code>## inner_join: added 10 columns (broad_id, name, dose, screen_id, moa, …)</code></pre>
-<pre><code>##             &gt; rows only in x  (        0)</code></pre>
-<pre><code>##             &gt; rows only in y  (        0)</code></pre>
-<pre><code>##             &gt; matched rows     2,708,508</code></pre>
-<pre><code>##             &gt;                 ===========</code></pre>
-<pre><code>##             &gt; rows total       2,708,508</code></pre>
-<pre class="r"><code># d.drug_sens_all_genes
+  inner_join(d.Broad_drug_info, by = c(&quot;compound&quot; = &quot;column_name&quot;))
+# d.drug_sens_all_genes
 
 ## reformat cell line metadata and add to filtered drug sensitivity DF
 d.drug_sens_all_genes &lt;- metadata %&gt;%
@@ -4815,15 +4736,8 @@ d.drug_sens_all_genes &lt;- metadata %&gt;%
   dplyr::select(-c(cell_line, screen_id, disease.area:phase)) %&gt;%
   rename(cell_line = stripped_cell_line_name,
          compound_name = name,
-         compound_id = compound)</code></pre>
-<pre><code>## right_join: added 13 columns (cell_line, compound, dependency, broad_id, name, …)</code></pre>
-<pre><code>##             &gt; rows only in x  (    1,236)</code></pre>
-<pre><code>##             &gt; rows only in y           0</code></pre>
-<pre><code>##             &gt; matched rows     2,708,508</code></pre>
-<pre><code>##             &gt;                 ===========</code></pre>
-<pre><code>##             &gt; rows total       2,708,508</code></pre>
-<pre><code>## rename: renamed 3 variables (cell_line, compound_id, compound_name)</code></pre>
-<pre class="r"><code># d.drug_sens_all_genes
+         compound_id = compound)
+# d.drug_sens_all_genes
 
 ## separate out DF so each target is on its own line
 d.drug_sens_all_genes &lt;- d.drug_sens_all_genes %&gt;%
@@ -5130,17 +5044,11 @@ CHRM1
 d.expr_tmp &lt;- expr %&gt;%
   dplyr::select(-c(gene, cell_line))</code></pre>
 <pre class="r"><code>d.drug_sens_all_genes &lt;- d.drug_sens_all_genes %&gt;%
-  filter(!is.na(target))</code></pre>
-<pre><code>## filter: removed 706,316 rows (10%), 6,367,248 rows remaining</code></pre>
-<pre class="r"><code>## copy number dataframe
-d.drug_sens_all_genes_cn &lt;- inner_join(d.drug_sens_all_genes, d.cn_tmp, by = c(&quot;depmap_id&quot;, &quot;target&quot; = &quot;gene_name&quot;))</code></pre>
-<pre><code>## inner_join: added 2 columns (log_copy_number, entrez_id)</code></pre>
-<pre><code>##             &gt; rows only in x  (   109,088)</code></pre>
-<pre><code>##             &gt; rows only in y  (47,005,189)</code></pre>
-<pre><code>##             &gt; matched rows      6,258,160</code></pre>
-<pre><code>##             &gt;                 ============</code></pre>
-<pre><code>##             &gt; rows total        6,258,160</code></pre>
-<pre class="r"><code>print_kbl(head(d.drug_sens_all_genes_cn))</code></pre>
+  filter(!is.na(target))
+
+## copy number dataframe
+d.drug_sens_all_genes_cn &lt;- inner_join(d.drug_sens_all_genes, d.cn_tmp, by = c(&quot;depmap_id&quot;, &quot;target&quot; = &quot;gene_name&quot;))
+print_kbl(head(d.drug_sens_all_genes_cn))</code></pre>
 <div style="border: 1px solid #ddd; padding: 5px; overflow-x: scroll; width:100%; ">
 <table class="table table-striped table-hover table-responsive" style="width: auto !important; ">
 <thead>
@@ -5479,14 +5387,8 @@ CHRM3
 </table>
 </div>
 <pre class="r"><code>## expression dataframe
-d.drug_sens_all_genes_expr &lt;- inner_join(d.drug_sens_all_genes, d.expr_tmp, by = c(&quot;depmap_id&quot;, &quot;target&quot; = &quot;gene_name&quot;))</code></pre>
-<pre><code>## inner_join: added 2 columns (rna_expression, entrez_id)</code></pre>
-<pre><code>##             &gt; rows only in x  (   151,624)</code></pre>
-<pre><code>##             &gt; rows only in y  (25,450,515)</code></pre>
-<pre><code>##             &gt; matched rows      6,215,624</code></pre>
-<pre><code>##             &gt;                 ============</code></pre>
-<pre><code>##             &gt; rows total        6,215,624</code></pre>
-<pre class="r"><code>print_kbl(head(d.drug_sens_all_genes_expr))</code></pre>
+d.drug_sens_all_genes_expr &lt;- inner_join(d.drug_sens_all_genes, d.expr_tmp, by = c(&quot;depmap_id&quot;, &quot;target&quot; = &quot;gene_name&quot;))
+print_kbl(head(d.drug_sens_all_genes_expr))</code></pre>
 <div style="border: 1px solid #ddd; padding: 5px; overflow-x: scroll; width:100%; ">
 <table class="table table-striped table-hover table-responsive" style="width: auto !important; ">
 <thead>
