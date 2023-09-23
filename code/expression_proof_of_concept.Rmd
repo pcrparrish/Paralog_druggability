@@ -1,0 +1,383 @@
+---
+title: "Proof-of-concept for expression analysis"
+author: "Phoebe Parrish"
+date: "9/23/2023"
+output: html_document
+---
+
+# Setup
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(ggrepel)
+library(ggforce)
+library(ggsignif)
+library(RColorBrewer)
+library(ggpubr) # another way to do significance bars
+library(ggprism) # another significance bar package...
+library(scales) # scientific notation
+library(ggtext) # for using superscript in labels
+library(DescTools) # for robust scaling
+library(kableExtra)
+library(ggrastr)
+
+```
+
+### Assign variables
+```{r}
+
+date <- Sys.Date()
+
+in_dir <- file.path("..", "results/integrated_dfs")
+
+out_dir <- file.path("..", "results/expression_output")
+
+options(dplyr.summarise.inform = FALSE)
+
+```
+
+### Import files
+
+```{r, message = FALSE}
+
+d.drug_sens_all_genes_expr <- read_rds(file.path(in_dir, "d.drug_sens_all_genes_expr"))
+
+```
+
+```{r}
+
+d.drug_sens_all_genes_expr <- d.drug_sens_all_genes_expr %>%
+  rename(log_tpm = rna_expression)
+
+```
+
+
+### Import functions
+
+```{r}
+
+source("shared_functions.R")
+
+```
+
+## Single-gene analysis
+
+This analysis is intended to demonstrate expected results for targeted inhibitors and their target (single) genes. 
+
+### PRISM Phase 1 drug sensitivity
+
+#### Continuous/linear regression
+
+```{r}
+
+## running lm for each sorted_gene_pair/compound_id group
+
+## use broom::glance to get rsquared and pval
+d.drug_sens_all_genes_expr_lm_summary <- d.drug_sens_all_genes_expr %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(log_tpm)) %>%
+  group_by(target, compound_id) %>%
+  group_modify(~ broom::glance(lm(dependency ~ log_tpm, data = .x))) %>%
+  dplyr::ungroup() %>%
+  rename(r_squared = r.squared, p_val = p.value)
+
+## FDR-adjust p-vals for multiple testing and add back to summary DF
+d.stats <- BH_adjust(d.drug_sens_all_genes_expr_lm_summary)
+
+d.drug_sens_all_genes_expr_lm_summary <- d.stats %>%
+  dplyr::select(-p_val) %>%
+  right_join(d.drug_sens_all_genes_expr_lm_summary, by = c("target", "compound_id")) %>%
+  dplyr::select(target, compound_id, r_squared, p_val, fdr)
+
+## use broom::tidy to get slope
+d.drug_sens_all_genes_expr_lm_slope <- d.drug_sens_all_genes_expr %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(log_tpm)) %>%
+  group_by(target, compound_id) %>%
+  group_modify(~ broom::tidy(lm(dependency ~ log_tpm, data = .x))) %>%
+  dplyr::ungroup() %>%
+  ## extract slope of lm fit line from output
+  filter(term == "log_tpm") %>%
+  rename(slope = estimate) %>%
+  dplyr::select(target, compound_id, slope) 
+
+## add rsquared, p-val, fdr, and slope info to main DF
+d.drug_sens_all_genes_expr_lm <- d.drug_sens_all_genes_expr %>%
+  left_join(d.drug_sens_all_genes_expr_lm_summary, by = c("target", "compound_id")) %>%
+  left_join(d.drug_sens_all_genes_expr_lm_slope, by = c("target", "compound_id")) %>%
+  filter(!is.na(dependency)) %>%
+  filter(!is.na(log_tpm))
+
+summarize_stats(d.drug_sens_all_genes_expr_lm)
+
+```
+
+
+
+```{r}
+
+## number of pairs with negative vs. positive slope
+d.drug_sens_all_genes_expr_lm %>%
+  distinct(target, compound_id, .keep_all = TRUE) %>%
+  mutate(slope_flag = ifelse(slope < 0, "negative", "positive")) %>%
+  group_by(slope_flag) %>%
+  summarize(n = n()) %>%
+  print_kbl()
+
+## get low expression = low LFC pairs (positive slope)
+d.drug_sens_all_genes_expr_lm_pos_slope <-d.drug_sens_all_genes_expr_lm %>%
+  filter(slope > 0)
+
+## get high expression = low LFC pairs (negative slope)
+d.drug_sens_all_genes_expr_lm_neg_slope <- d.drug_sens_all_genes_expr_lm %>%
+  filter(slope < 0)
+
+## summarize significant drug/gene combos for each new DF
+summarize_stats(d.drug_sens_all_genes_expr_lm_pos_slope)
+summarize_stats(d.drug_sens_all_genes_expr_lm_neg_slope)
+
+```
+
+##### Plot
+###### example genes
+```{r, message = FALSE}
+
+d.top_neg_hits <- d.drug_sens_all_genes_expr_lm_neg_slope %>% 
+  unite("target_compound_label", c("target", "compound_name"), sep = "\n", remove = FALSE) %>% 
+  arrange(fdr) %>%
+  filter(fdr < 0.05) %>%
+  distinct(target_compound_label)
+print_kbl(head(d.top_neg_hits, n = 20))
+
+```
+
+
+
+```{r, message = FALSE}
+
+plot_list <- c("MDM2\nidasanutlin", "ERBB2\nGW-583340", "EGFR\nPD-153035")
+
+selected_top_lm_hits <- make_lm_plot(d.drug_sens_all_genes_expr_lm_neg_slope, plot_list, log_tpm)
+
+```
+
+
+```{r}
+
+d.drug_sens_all_genes_expr_lm_neg_slope_topHits <- d.drug_sens_all_genes_expr_lm_neg_slope %>% 
+  filter(fdr < 0.05) %>%
+  arrange(fdr) %>%
+  distinct(target, compound_id, .keep_all = TRUE) %>%
+  dplyr::select(target, compound_name, slope, r_squared:fdr, moa)
+print_kbl(head(d.drug_sens_all_genes_expr_lm_neg_slope_topHits))
+
+d.drug_sens_all_genes_expr_lm_pos_slope_fdr_topHits <- d.drug_sens_all_genes_expr_lm_pos_slope %>% 
+  filter(fdr < 0.05) %>%
+  arrange(fdr) %>%
+  distinct(target, compound_id, .keep_all = TRUE) %>%
+  dplyr::select(target, compound_name, slope, r_squared:fdr, moa)
+print_kbl(head(d.drug_sens_all_genes_expr_lm_pos_slope_fdr_topHits))
+
+```
+
+
+#### Z-scaled outliers
+
+Since many target genes do not show a truly linear pattern of expression vs. cell viability, and in some cases the linear regression fit line seemed to be strongly influenced by outliers, we decided to take another approach to model these data. We instead used an outlier-based approach to group cell lines into low, high, and "neither" expression categories. 
+
+```{r}
+
+## robustly scale expression data
+d.drug_sens_all_genes_expr_outlier <- d.drug_sens_all_genes_expr %>%
+  filter(!is.na(log_tpm)) %>%
+  filter(!is.na(dependency)) %>%
+  group_by(target, compound_id) %>% 
+  mutate(scaled_log_tpm = RobScale(log_tpm, center = TRUE, scale = TRUE)) %>%
+  mutate(expr_outlier_flag = case_when(
+    scaled_log_tpm < -2 ~ "low",
+    scaled_log_tpm > 2 ~ "high", 
+    TRUE ~ "neither")) %>%
+  mutate(expr_low_flag = case_when(
+    scaled_log_tpm < -2 ~ TRUE,
+    TRUE ~ FALSE)) %>% ## if expression ≥ -2, classify as "not low"
+  ungroup() %>%
+  mutate(expr_outlier_flag = factor(expr_outlier_flag, levels = c("low", "neither", "high"))) 
+
+## how many target/compound pairs have no expression outliers?
+d.drug_sens_all_genes_expr_outlier %>%
+  group_by(target, compound_id) %>%
+  distinct(expr_low_flag) %>%
+  summarize(n = n()) %>%
+  filter(n < 2) %>%
+  nrow() %>%
+  print_kbl()
+
+```
+
+
+##### Split into positive and negative outliers
+
+```{r}
+
+d.drug_sens_all_genes_expr_outlier %>%
+  group_by(target, compound_id, expr_outlier_flag) %>%
+  summarize(n = n()) %>%
+  group_by(expr_outlier_flag) %>%
+  summarize(mean = mean(n),
+            median = median(n)) %>%
+  print_kbl()
+
+## how many compounds/targets have 0 high or low outlier cell lines?
+d.drug_sens_all_genes_expr_outlier %>%
+  group_by(target, compound_id, expr_outlier_flag) %>%
+  summarize(n = n()) %>%
+  ungroup() %>%
+  group_by(target, compound_id) %>%
+  summarize(n = n()) %>%
+  filter(n < 3) %>%
+  nrow() %>%
+  print_kbl()
+  
+```
+
+```{r}
+
+## low vs. neither (with high included but ignoring it) => 
+## calculate diff in median LFC between relevant groups
+
+d.drug_sens_all_genes_expr_outlier_low <- d.drug_sens_all_genes_expr_outlier %>%
+  group_by(target, compound_id) %>%
+  ## get rid of drug/targets that don't have any "low" cell lines
+  filter(any(expr_outlier_flag == "low")) %>%
+  ungroup() 
+
+d.drug_sens_all_genes_expr_outlier_low_grp_med_diff <- d.drug_sens_all_genes_expr_outlier_low %>%
+  group_by(target, compound_id, expr_outlier_flag) %>%
+  ## calculate median dependency score for each outlier group
+  summarize(grp_med_dependency = median(dependency)) %>%
+  pivot_wider(names_from = expr_outlier_flag, values_from = grp_med_dependency) %>%
+  ## calculate difference between low and neither groups
+  mutate(grp_med_diff = low - neither) %>%
+  dplyr::select(target, compound_id, grp_med_diff) 
+
+d.drug_sens_all_genes_expr_outlier_low <- d.drug_sens_all_genes_expr_outlier_low %>%
+  left_join(d.drug_sens_all_genes_expr_outlier_low_grp_med_diff, by = c("target", "compound_id"))
+
+## high vs. neither (with low included but ignoring it) => 
+## calculate diff in median LFC between relevant groups =>
+d.drug_sens_all_genes_expr_outlier_high <- d.drug_sens_all_genes_expr_outlier %>%
+  group_by(target, compound_id) %>%
+  ## get rid of drug/targets that don't have any "high" cell lines
+  filter(any(expr_outlier_flag == "high")) %>%
+  ungroup() 
+
+d.drug_sens_all_genes_expr_outlier_high_grp_med_diff <- d.drug_sens_all_genes_expr_outlier_high %>%
+  group_by(target, compound_id, expr_outlier_flag) %>%
+  ## calculate median dependency score for each outlier group
+  summarize(grp_med_dependency = median(dependency)) %>%
+  pivot_wider(names_from = expr_outlier_flag, values_from = grp_med_dependency) %>%
+  ## calculate difference between low and neither groups
+  mutate(grp_med_diff = high - neither) %>%
+  dplyr::select(target, compound_id, grp_med_diff) 
+
+d.drug_sens_all_genes_expr_outlier_high <- d.drug_sens_all_genes_expr_outlier_high %>%
+  left_join(d.drug_sens_all_genes_expr_outlier_high_grp_med_diff, by = c("target", "compound_id"))
+
+```
+
+
+
+```{r}
+
+## low outliers and drug sensitivity
+## calculate p-value (adjusted for multiple within-group tests?)
+d.drug_sens_all_genes_expr_outlier_low_wrst_pvals <- d.drug_sens_all_genes_expr_outlier_low %>%
+  ## remove cell lines that are high outliers 
+  filter(expr_outlier_flag != "high") %>%
+  group_by(target, compound_id) %>%
+  summarize(p_val = wilcox.test(dependency ~ expr_outlier_flag)$p.value)
+
+## adjust for multiple testing overall
+d.stats <- BH_adjust(d.drug_sens_all_genes_expr_outlier_low_wrst_pvals)
+
+d.drug_sens_all_genes_expr_outlier_low_wrst <- d.drug_sens_all_genes_expr_outlier_low %>%
+  left_join(d.stats, by = c("target", "compound_id")) 
+
+d.drug_sens_all_genes_expr_outlier_low_wrst_sens <- d.drug_sens_all_genes_expr_outlier_low_wrst %>%
+  filter(grp_med_diff < 0)
+
+d.drug_sens_all_genes_expr_outlier_low_wrst_resist <- d.drug_sens_all_genes_expr_outlier_low_wrst %>%
+  filter(grp_med_diff > 0)
+
+## high outliers and drug sensitivity
+d.drug_sens_all_genes_expr_outlier_high_wrst_sens_pvals <- d.drug_sens_all_genes_expr_outlier_high %>%
+  ## remove cell lines that are low outliers 
+  filter(expr_outlier_flag != "low") %>%
+  group_by(target, compound_id) %>%
+  summarize(p_val = wilcox.test(dependency ~ expr_outlier_flag)$p.value)
+
+## adjust for multiple testing overall
+d.stats <- BH_adjust(d.drug_sens_all_genes_expr_outlier_high_wrst_sens_pvals)
+
+d.drug_sens_all_genes_expr_outlier_high_wrst <- d.drug_sens_all_genes_expr_outlier_high %>%
+  left_join(d.stats, by = c("target", "compound_id"))
+
+## high outliers and drug sensitivity
+d.drug_sens_all_genes_expr_outlier_high_wrst_sens <- d.drug_sens_all_genes_expr_outlier_high_wrst %>%
+  ## remove cell lines where high outliers don't have a higher median dependency score than the other groups
+  filter(grp_med_diff < 0)
+
+d.drug_sens_all_genes_expr_outlier_high_wrst_resist <- d.drug_sens_all_genes_expr_outlier_high_wrst %>%
+  ## remove cell lines where low outliers don't have a lower median dependency score than the other groups
+  filter(grp_med_diff > 0)
+
+```
+
+```{r}
+
+## low outliers
+summarize_stats(d.drug_sens_all_genes_expr_outlier_low_wrst_sens)
+summarize_stats(d.drug_sens_all_genes_expr_outlier_low_wrst_resist)
+
+## high outliers
+summarize_stats(d.drug_sens_all_genes_expr_outlier_high_wrst_sens)
+summarize_stats(d.drug_sens_all_genes_expr_outlier_high_wrst_resist)
+
+```
+
+###### Plot
+
+
+```{r, message=FALSE, fig.height=8}
+
+make_outlier_plot(d.drug_sens_all_genes_expr_outlier_low_wrst_resist,
+                  c("MDM2\nidasanutlin", "ERBB2\nGW-583340", "EGFR\nPD-153035"), "low", expr_outlier_flag, log_tpm)
+
+```
+
+Compare this output to that from the linear model-based approach: 
+```{r}
+
+selected_top_lm_hits
+
+```
+
+
+
+##### Plot lineage
+
+What does the expression of each target gene look like across cell lineages?
+
+```{r, message=FALSE, fig.height=6}
+
+make_lineage_plot(d.drug_sens_all_genes_expr_outlier_low_wrst_resist, 
+                  c("MDM2\nidasanutlin", "ERBB2\nGW-583340", "EGFR\nPD-153035"), log_tpm, expr_outlier_flag)
+
+
+```
+
+
+
+
+

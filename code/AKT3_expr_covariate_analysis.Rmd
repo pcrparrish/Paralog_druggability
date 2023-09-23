@@ -22,6 +22,7 @@ library(ggprism) # another significance bar package...
 library(scales) # scientific notation
 library(ggtext) # for using superscript in labels
 library(DescTools) # for robust scaling
+library(kableExtra)
 
 ```
 
@@ -49,53 +50,40 @@ options(dplyr.summarise.inform = FALSE)
 
 d.DeKegel_top5_pairs_drug_sens_expr_annot <- read_rds(file.path(expr_dir, "d.top_outlier_pairs"))
 
-# d.Broad_drug_info <- read_csv(file.path(in_dir, "primary-screen-replicate-collapsed-treatment-info.csv"))
-# 
-# d.Broad_secondary_auc <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
-# 
-# d.Broad_secondary_doses <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
-# 
-# d.drug_sens_all_genes_expr <- read_rds(file.path(out_dir, "d.drug_sens_all_genes_expr"))
-# 
-# # d.drug_sens_all_genes_drug_sens_cn_annot <- read_rds(file.path(out_dir, "d.drug_sens_all_genes_cn_annot"))
-# 
 d.DeKegel_top5_pairs_drug_sens_cn_annot <- read_rds(file.path(df_dir, "d.DeKegel_top5_pairs_drug_sens_cn_annot"))
-# 
-# d.DeKegel_top5_pairs_drug_sens_expr_A2_lm_pos_top_outliers_wrst_sens_adjOutlierCutoff <- read_rds(file.path(out_dir, "d.DeKegel_top5_pairs_drug_sens_expr_A2_lm_pos_top_outliers_wrst_sens_adjOutlierCutoff"))
-# 
-# d.mut_21Q2_DeKegel_top5 <- read_rds(file.path(out_dir, "d.mut_21Q2_DeKegel_top5"))
 
 d.PI3K_pathway <- read_tsv(file.path(in_dir, "PI3K_Akt_pathway.txt"))
 
-# d.phase2_dose_response <- read_rds(file.path(out_dir, "d.phase2_dose_response_data"))
-# 
-# d.Broad_drug_info <- read_csv(file.path(in_dir, "primary-screen-replicate-collapsed-treatment-info.csv"))
-# 
-# d.phase2_auc <- read_csv(file.path(in_dir, "secondary-screen-dose-response-curve-parameters.csv"))
+```
+
+### Import functions
+
+```{r}
+
+source("shared_functions.R")
 
 ```
-# Analysis
-## AKT3 expr covariates
 
-### CN vs. expression
+# AKT3 expr covariates
+
+## Expression vs. copy number
+
+The purpose of this analysis is to determine whether the loss of expression of *AKT3* in certain cell lines is due to an underlying copy number loss across cell lines. 
+
 ```{r}
 
 d.AKT3_expr_outlier_top_hit <- d.DeKegel_top5_pairs_drug_sens_expr_annot %>%
   filter(sorted_gene_pair == "AKT1_AKT3" & compound_name == "GSK2110183")
-d.AKT3_expr_outlier_top_hit
 
 d.AKT3_expr_outlier_top_hit_withCN <- d.DeKegel_top5_pairs_drug_sens_cn_annot %>%
   filter(sorted_gene_pair == "AKT1_AKT3" & compound_name == "GSK2110183") %>%
   dplyr::select(depmap_id, A2_log_cn) %>%
   rename(AKT3_log_cn = A2_log_cn) %>%
   right_join(d.AKT3_expr_outlier_top_hit, by = "depmap_id")
-# d.AKT3_expr_outlier_top_hit_withCN
 
 ```
 
 ```{r, warning = FALSE, message = FALSE}
-
-# d.AKT3_expr_outlier_top_hit_withCN
 
 ggplot(d.AKT3_expr_outlier_top_hit_withCN, aes(x = A2_log_tpm, y = AKT3_log_cn, color = A2_expr_outlier_flag)) +
   geom_hline(yintercept = 1) +
@@ -109,7 +97,10 @@ ggplot(d.AKT3_expr_outlier_top_hit_withCN, aes(x = A2_log_tpm, y = AKT3_log_cn, 
 ```
 It doesn't look like there is a correlation between low copy number and low expression for *AKT3*. 
 
-### Mutations in PI3K/Akt pathway genes
+## Mutations in PI3K/Akt pathway genes
+
+The purpose of this analysis is to determine whether the loss of expression of *AKT3* in certain cell lines is due to mutations in a subset of cell lines in either *AKT3* itself or in other PI3K/Akt pathway genes. 
+
 ```{r, message=FALSE}
 
 ## get DepMap mutation call information
@@ -142,9 +133,6 @@ d.mut_calls_PI3K_pathway_deleterious <- d.mut_calls_PI3K_pathway %>%
 
 ```{r}
 
-# d.mut_calls_PI3K_pathway %>%
-#   filter(gene_name == "PIK3CA")
-
 mut_calls_PI3K_pathway_tcga_hotspot <- d.mut_calls_PI3K_pathway %>%
   filter(is_tcga_hotspot == TRUE) %>%
   distinct(depmap_id, gene_name) %>%
@@ -161,8 +149,7 @@ d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot <- full_join(d.PI3K_pathway, d.tmp,
   unite(id, c(depmap_id, gene_name), remove = FALSE) %>%
   mutate(tcga_hotspot = case_when(
     id %in% mut_calls_PI3K_pathway_tcga_hotspot ~ TRUE,
-    TRUE ~ FALSE
-  )) %>%
+    TRUE ~ FALSE)) %>%
   mutate(tcga_hotspot = factor(tcga_hotspot, levels = c(TRUE, FALSE)))
 
 ```
@@ -171,16 +158,10 @@ d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot <- full_join(d.PI3K_pathway, d.tmp,
 ```{r}
 
 ## merge PI3K deleterious mutation calls with expression DF
-d.mut_calls_PI3K_pathway_deleterious
-
 ## get just cell line and expr info
 d.tmp <- d.AKT3_expr_outlier_top_hit %>%
   dplyr::select(depmap_id, A2_log_tpm, A2_expr_outlier_flag) %>%
   rename(AKT3_log_tpm = A2_log_tpm, AKT3_expr_outlier_flag = A2_expr_outlier_flag)
-
-
-d.mut_calls_PI3K_pathway_deleterious %>%
-  filter(gene_name == "PIK3CA")
 
 mut_calls_PI3K_pathway_deleterious <- d.mut_calls_PI3K_pathway_deleterious %>%
   distinct(depmap_id, gene_name) %>%
@@ -192,155 +173,41 @@ d.AKT3_expr_outlier_top_hit_AKT_del_mut <- full_join(d.PI3K_pathway, d.tmp, by =
   unite(id, c(depmap_id, gene_name), remove = FALSE) %>%
   mutate(deleterious_mut = case_when(
     id %in% mut_calls_PI3K_pathway_deleterious ~ TRUE,
-    TRUE ~ FALSE
-  )) %>%
+    TRUE ~ FALSE)) %>%
   mutate(deleterious_mut = factor(deleterious_mut, levels = c(TRUE, FALSE)))
 
-d.AKT3_expr_outlier_top_hit_AKT_del_mut%>%
-  group_by(gene_name, deleterious_mut) %>%
-  summarize(n = n())
-
-```
-
-```{r, fig.height=12}
-
-d.AKT3_expr_outlier_top_hit_AKT_del_mut
-
-d.AKT3_expr_outlier_top_hit_AKT_del_mut %>%
-  filter(gene_name == "AKT1") %>%
-  ggplot(aes(x = deleterious_mut, y = AKT3_log_tpm, color = AKT3_expr_outlier_flag)) +
-  geom_jitter() +
-  scale_color_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F", "high" = "#B84250")) +
-  theme_bw() +
-  theme(axis.text = element_text(color = "black"),
-        axis.ticks = element_line(color = "black")) +
-  facet_wrap(~gene_name)
-
-d.AKT3_expr_outlier_top_hit_AKT_del_mut %>%
-  distinct(gene_name) %>%
-  nrow()
-
-ggplot(d.AKT3_expr_outlier_top_hit_AKT_del_mut, 
-       aes(x = deleterious_mut, y = AKT3_log_tpm, color = AKT3_expr_outlier_flag)) +
-  geom_jitter() +
-  scale_color_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F", "high" = "#B84250")) +
-  theme_bw() +
-  theme(axis.text = element_text(color = "black"),
-        axis.ticks = element_line(color = "black")) +
-  facet_wrap(~gene_name, ncol = 4)
-# ggsave(file.path(out_dir, "AKT3_expr_vs_PI3K_pathway_muts.png"), width = )
-
-ggplot(d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot, 
-       aes(x = tcga_hotspot, y = AKT3_log_tpm, color = AKT3_expr_outlier_flag)) +
-  geom_jitter() +
-  scale_color_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F", "high" = "#B84250")) +
-  theme_bw() +
-  theme(axis.text = element_text(color = "black"),
-        axis.ticks = element_line(color = "black")) +
-  facet_wrap(~gene_name, ncol = 4)
-# ggsave(file.path(out_dir, "AKT3_expr_vs_PI3K_pathway_muts.png"), width = )
-
 ```
 
 ```{r}
-
-d.tmp <- d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot %>%
-  filter(gene_name == "PIK3CA") %>%
-  filter(AKT3_expr_outlier_flag != "high") %>%
-  mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither")))
-d.tmp
-
-cont <- table(d.tmp$AKT3_expr_outlier_flag, d.tmp$tcga_hotspot)
-cont
-
-fisher.test(cont)
-
-d.tmp <- d.AKT3_expr_outlier_top_hit_AKT_del_mut %>%
-  filter(gene_name == "PIK3CB") %>%
-  filter(AKT3_expr_outlier_flag != "high") %>%
-  mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither")))
-d.tmp
-
-cont <- table(d.tmp$AKT3_expr_outlier_flag, d.tmp$deleterious_mut)
-cont
-
-fisher.test(cont)
-
-d.tmp <- d.AKT3_expr_outlier_top_hit_AKT_del_mut %>%
-  filter(gene_name == "PRKDC") %>%
-  filter(AKT3_expr_outlier_flag != "high") %>%
-  mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither")))
-d.tmp
-
-cont <- table(d.tmp$AKT3_expr_outlier_flag, d.tmp$deleterious_mut)
-cont
-
-fisher.test(cont)
-
-```
-
-```{r}
-
-## run fisher.test() for all genes
-# d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot %>%
-#   group_by(gene_name) %>%
-#   filter(AKT3_expr_outlier_flag != "high") %>%
-#   mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither"))) %>%
-#   count(AKT3_expr_outlier_flag, tcga_hotspot, .drop = FALSE) %>%
-#   group_by(gene_name) %>%
-#   pivot_wider(names_from = tcga_hotspot, values_from = n) %>%
-#   dplyr::select(-c(AKT3_expr_outlier_flag)) %>%
-#   fisher.test(x = "TRUE", y = "FALSE") %>%
-#   broom::glance()
 
 d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot_fisher_pval <- d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot %>%
-  # group_by(gene_name) %>%
   filter(AKT3_expr_outlier_flag != "high") %>%
   mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither"))) %>%
   group_by(gene_name) %>%
   summarize(p_val = fisher.test(AKT3_expr_outlier_flag, tcga_hotspot)$p.value)
 
 d.AKT3_expr_outlier_top_hit_AKT_del_mut_fisher_pval <- d.AKT3_expr_outlier_top_hit_AKT_del_mut %>%
-  # group_by(gene_name) %>%
   filter(AKT3_expr_outlier_flag != "high") %>%
   mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither"))) %>%
   group_by(gene_name) %>%
   summarize(p_val = fisher.test(AKT3_expr_outlier_flag, deleterious_mut)$p.value)
 
-d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot %>%
-  # group_by(gene_name) %>%
-  filter(AKT3_expr_outlier_flag != "high") %>%
-  mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither"))) %>%
-  group_by(gene_name) %>%
-  # group_modify(~ broom::glance(fisher.test(x = AKT3_expr_outlier_flag, y = tcga_hotspot)))
-  do(broom::tidy(fisher.test(.$AKT3_expr_outlier_flag, .$tcga_hotspot)))
-
-d.AKT3_expr_outlier_top_hit_AKT_del_mut %>%
-  # group_by(gene_name) %>%
-  filter(AKT3_expr_outlier_flag != "high") %>%
-  mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither"))) %>%
-  group_by(gene_name) %>%
-  # group_modify(~ broom::glance(fisher.test(x = AKT3_expr_outlier_flag, y = tcga_hotspot)))
-  do(broom::tidy(fisher.test(.$AKT3_expr_outlier_flag, .$deleterious_mut)))
-
 ```
-See: this blog post on tidy chi-squared tests: http://ritsokiguess.site/docs/2018/04/12/tidy-chi-squared-testing/
-https://stackoverflow.com/questions/42991993/get-chisq-testp-value-for-several-groups-using-dplyrgroup-by
+
 
 ```{r}
+
 d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot <- d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot %>%
   left_join(d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot_fisher_pval, by = "gene_name") %>%
   mutate(tcga_hotspot = factor(tcga_hotspot, levels = c(TRUE, FALSE)))
-# d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot_fisher_pval
 
 d.AKT3_expr_outlier_top_hit_AKT_del_mut <- d.AKT3_expr_outlier_top_hit_AKT_del_mut %>%
   left_join(d.AKT3_expr_outlier_top_hit_AKT_del_mut_fisher_pval, by = "gene_name")
-# d.AKT3_expr_outlier_top_hit_AKT_del_mut_fisher_pval
 
 ```
 
 
-```{r}
+```{r, fig.height=10, fig.width=10}
 
 d.label <- d.AKT3_expr_outlier_top_hit_AKT_del_mut %>%
   filter(AKT3_expr_outlier_flag == "low" | AKT3_expr_outlier_flag == "neither") %>%
@@ -355,26 +222,23 @@ d.label <- d.AKT3_expr_outlier_top_hit_AKT_del_mut %>%
     p_val < 0.05 ~ scientific(p_val, 3),
     p_val >= 0.05 ~ "ns")) %>%
   ungroup()
-d.label
-
 
 ggplot(d.AKT3_expr_outlier_top_hit_AKT_del_mut, aes(x = deleterious_mut, y = AKT3_log_tpm, color = AKT3_expr_outlier_flag)) +
-  geom_jitter() +
+  geom_jitter(size = 1) +
   stat_pvalue_manual(d.label, label = "{p_val_label}", hide.ns = TRUE,## "P = {p_val}"
                      tip.length = 0.03, size = 3, vjust = -0.5) +
   scale_color_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F", "high" = "#B84250")) +
   scale_y_continuous(expand = expansion(mult = c(0.1, 0.25))) +
+  labs(x = "Deleterious_mutation_present", y = "AKT3_log2(TPM)") +
   theme_bw() +
   theme(axis.text = element_text(color = "black"),
         axis.ticks = element_line(color = "black")) +
-  facet_wrap(~gene_name, ncol = 4, scales = "free")
-# ggsave(file.path(out_dir, "AKT3_expr_vs_PI3K_pathway_del_muts.png"), width = 10, height = 16)
-
+  facet_wrap(~gene_name, ncol = 6, scales = "free_y")
 
 ```
 
 
-```{r}
+```{r, fig.height=10, fig.width=10}
 
 d.label <- d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot %>%
   filter(AKT3_expr_outlier_flag == "low" | AKT3_expr_outlier_flag == "neither") %>%
@@ -389,331 +253,19 @@ d.label <- d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot %>%
     p_val < 0.05 ~ scientific(p_val, 3),
     p_val >= 0.05 ~ "ns")) %>%
   ungroup()
-d.label
-
 
 ggplot(d.AKT3_expr_outlier_top_hit_AKT_tcga_hotspot, aes(x = tcga_hotspot, y = AKT3_log_tpm, color = AKT3_expr_outlier_flag)) +
-  geom_jitter() +
+  geom_jitter(size = 1) +
   stat_pvalue_manual(d.label, label = "{p_val_label}", hide.ns = TRUE,## "P = {p_val}"
                      tip.length = 0.03, size = 3, vjust = -0.5) +
   scale_color_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F", "high" = "#B84250")) +
   scale_y_continuous(expand = expansion(mult = c(0.1, 0.25))) +
+  labs(x = "TCGA_hotspot_mutation_present", y = "AKT3_log2(TPM)") +
   theme_bw() +
   theme(axis.text = element_text(color = "black"),
         axis.ticks = element_line(color = "black")) +
-  facet_wrap(~gene_name, ncol = 4, scales = "free")
-ggsave(file.path(out_dir, "AKT3_expr_vs_PI3K_pathway_tcga_hotspot_muts.png"), width = 10, height = 16)
+  facet_wrap(~gene_name, ncol = 6, scales = "free_y")
 
 ```
 
-
-
-
-
-## Phase 2 data
-
-```{r}
-
-## first time
-# eh <- ExperimentHub()
-# eh.depmap <- query(eh, "depmap")
-# expr <- eh[["EH6120"]]
-# write_rds(expr, file.path(out_dir, "d.expr_21Q2"))
-
-expr <- read_rds(file.path(out_dir, "d.expr_21Q2"))
-
-```
-
-```{r}
-
-## get AUC data, add drug annotations
-d.Broad_drug_info
-d.phase2_auc
-
-AKT_inhibitor_ids <- d.Broad_drug_info %>%
-  filter(moa == "AKT inhibitor") %>%
-  pull(broad_id)
-
-d.DeKegel_top5_pairs_drug_sens_expr_A2_lm_pos_top_outliers_wrst_sens_adjOutlierCutoff
-d.DeKegel_top5_pairs_drug_sens_expr_annot
-
-d.tmp1 <- d.phase2_auc %>%
-  dplyr::select(depmap_id) %>%
-  distinct()
-
-nrow(d.tmp)
- 
-d.tmp2 <- d.DeKegel_top5_pairs_drug_sens_expr_annot %>%
-  dplyr::select(depmap_id) %>%
-  distinct() 
-
-## cell lines that overlap between Phase 1 expression df and Phase 2 drug df
-inner_join(d.tmp1, d.tmp2)
-
-## cell lines that don't overlap between Phase 1 expression df and Phase 2 drug df
-anti_join(d.tmp1, d.tmp2)
-
-```
-
-```{r}
-
-## get AKT3 expr data for Phase 2 cell lines
-d.AKT3_expr <- expr %>%
-  filter(gene_name == "AKT3") %>%
-  dplyr::select(depmap_id, rna_expression) %>%
-  rename(AKT3_log_tpm = rna_expression)
-d.AKT3_expr
-
-
-
-```
-
-```{r}
-
-## filter dose response datasets for just drugs of interest (all AKT inhibitors?)
-
-# d.DeKegel_top5_pairs_drug_sens_expr_annot
-
-d.phase2_auc_AKTi_only <- d.phase2_auc %>%
-  filter(moa == "AKT inhibitor") %>%
-  dplyr::select(broad_id, depmap_id, name, screen_id, auc) %>%
-  rename(compound_id = broad_id)
-d.phase2_auc_AKTi_only
-
-# d.phase2_dose_response
-d.phase2_dose_response_AKTi_only <- d.phase2_dose_response %>%
-  dplyr::select(depmap_id, matches(paste(AKT_inhibitor_ids, collapse = "|")))
-d.phase2_dose_response_AKTi_only
-
-# d.AKT3_expr_only <- d.AKT3_expr_outlier_top_hit %>%
-#   dplyr::select(depmap_id, A2_log_tpm, A2_expr_outlier_flag) %>%
-#   rename(AKT3_log_tpm = A2_log_tpm, AKT3_expr_outlier_flag = A2_expr_outlier_flag)
-# d.AKT3_expr_only
-
-d.phase2_auc_AKTi_only_AKT3_expr <- left_join(d.phase2_auc_AKTi_only, 
-                                              d.AKT3_expr, 
-                                              by = "depmap_id") %>%
-  filter(!is.na(AKT3_log_tpm) | !is.na(auc)) %>%
-  group_by(compound_id) %>%
-  mutate(scaled_AKT3_log_tpm = RobScale(AKT3_log_tpm, center = TRUE, scale = TRUE)) %>%
-  mutate(AKT3_expr_outlier_flag = case_when(
-    scaled_AKT3_log_tpm < -1.5 ~ "low",
-    scaled_AKT3_log_tpm > 1.5 ~ "high",
-    TRUE ~ "neither")) %>%
-  ungroup() %>%
-  mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither", "high"))) 
-d.phase2_auc_AKTi_only_AKT3_expr
-
-## add AKT3 expr data to each cell line 
-##    check if the same cell lines were used for Phase 1 and Phase 2
-##    re-calculate robustly-scaled expr outliers if not^
-
-## group by outlier groups and test significant difference
-
-## plot AUC and dose response data
-
-## fix AUC DF to get rid of NAs (there seem to be more than I expected)
-
-# d.phase2_dose_response
-
-```
-
-```{r}
-
-d.phase2_auc_AKTi_only_AKT3_expr 
-
-d.p_vals <- d.phase2_auc_AKTi_only_AKT3_expr %>%
-  filter(AKT3_expr_outlier_flag == "low" | AKT3_expr_outlier_flag == "neither") %>%
-  group_by(name) %>%
-  summarize("p_val" = wilcox.test(auc ~ AKT3_expr_outlier_flag)$p.value)
-d.p_vals
-
-d.phase2_auc_AKTi_only_AKT3_expr %>%
-  filter(AKT3_expr_outlier_flag == "low" | AKT3_expr_outlier_flag == "neither") %>%
-  group_by(name) %>%
-  group_modify(~ broom::glance(wilcox.test(auc ~ AKT3_expr_outlier_flag, data = .x)))
-
-# d.phase2_auc_AKTi_only_AKT3_expr %>%
-#   filter(AKT3_expr_outlier_flag == "low" | AKT3_expr_outlier_flag == "neither") %>%
-#   group_by(name) %>%
-#   map_dfr(~ (wilcox.test(auc ~ AKT3_expr_outlier_flag, data = .x)))
-
-## put mini version on Github
-
-## try map_dfr: resultTable <- purrr::map_dfr(repaired, rbind, .id = "molecular_id")
-# ~ broom::glance(lm(dependency ~ combined_log_tpm, data = .x))
-
-```
-
-
-```{r}
-
-
-d.label <- d.phase2_auc_AKTi_only_AKT3_expr %>%
-  filter(AKT3_expr_outlier_flag == "low" | AKT3_expr_outlier_flag == "neither") %>%
-  mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither"))) %>%
-  group_by(name) %>%
-  mutate(y.position = (max(auc) + 0.1*(max(auc) - min(auc)))) %>%
-  left_join(d.p_vals, by = "name") %>%
-  dplyr::select(name, p_val, y.position) %>%
-  distinct(name, .keep_all = TRUE) %>%
-  mutate(group1 = "low",
-         group2 = "neither") %>%
-  mutate(p_val_label = case_when(
-    p_val < 0.05 ~ scientific(p_val, 3),
-    p_val >= 0.05 ~ "ns")) %>%
-  ungroup()
-d.label
-
-  # dplyr::ungroup() %>%
-  # dplyr::select(target_compound_label, p_val, fdr, y.position) %>%
-  # distinct(target_compound_label, .keep_all = TRUE) %>%
-  # mutate(group1 = "low",
-  #        group2 = "neither",
-  #        p_val = scientific(p_val, 3)
-
-## fix this to get expression for NA cell lines
-d.phase2_auc_AKTi_only_AKT3_expr %>%
-  filter(AKT3_expr_outlier_flag == "low" | AKT3_expr_outlier_flag == "neither") %>%
-  mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither"))) %>%
-  ggplot(aes(x = AKT3_expr_outlier_flag, y = auc)) +
-  geom_jitter(aes(color = AKT3_expr_outlier_flag), width = 0.3, size = 1, alpha = 0.7) +
-  geom_boxplot(aes(fill = AKT3_expr_outlier_flag), outlier.shape = NA, coef = 0) +
-  stat_pvalue_manual(d.label, label = "{p_val_label}", hide.ns = TRUE,## "P = {p_val}"
-                     tip.length = 0.03, size = 3, vjust = -0.5) +
-  scale_color_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F")) +
-  scale_fill_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F")) +
-  # labs(x = x_title, y = y_title) +
-  scale_y_continuous(expand = expansion(mult = c(0.1, 0.25))) +
-  theme_bw() +
-  theme(aspect.ratio = 0.8,
-        axis.text = element_text(color = "black"),
-        # axis.text.x = element_text(angle = 45, hjust=1),
-        axis.ticks = element_line(color = "black"),
-        legend.position = "none") +
-  facet_wrap(~name, scales = "free_y")
-# ggsave(file.path(out_dir, "AKT3_expr_vs_AKT3i_sensitivity_depmap_phase2_data.png"), height = 6, width = 6)
-
-```
-
-```{r}
-
-d.phase2_dose_response_AKTi_only_long <- d.phase2_dose_response_AKTi_only %>%
-  pivot_longer(!depmap_id, 
-               names_to = "compound_dose",
-               values_to = "rep_collapsed_lfc") %>%
-  separate(col = compound_dose, 
-           into = c("compound_id", "dose", "screen"),
-           sep = "::", 
-           extra = "merge", ## if >3 columns, merge "extras" into last col
-           remove = TRUE) %>% ## remove original column that's now been separated
-  filter(screen == "HTS002") %>%
-  dplyr::select(-screen) %>%
-  mutate(dose = as.numeric(dose)) %>%
-  filter(!is.na(rep_collapsed_lfc)) 
-d.phase2_dose_response_AKTi_only_long
-
-## add AKT3 expr info to dose response DF
-d.phase2_dose_response_AKTi_only_expr <- d.phase2_auc_AKTi_only_AKT3_expr %>%
-  dplyr::select(depmap_id, AKT3_log_tpm, AKT3_expr_outlier_flag) %>%
-  distinct(depmap_id, .keep_all = TRUE) %>%
-  left_join(d.phase2_dose_response_AKTi_only_long, by = "depmap_id")
-d.phase2_dose_response_AKTi_only_expr
-
-## add drug names to dose response DF
-d.phase2_dose_response_AKTi_only_expr <- d.Broad_drug_info %>%
-  rename(compound_id = broad_id, compound_name = name) %>%
-  dplyr::select(compound_id, compound_name) %>%
-  right_join(d.phase2_dose_response_AKTi_only_expr, by = "compound_id")
-
-## calculate median LFC 
-d.phase2_dose_response_AKTi_only_expr_summ <- d.phase2_dose_response_AKTi_only_expr %>%
-  group_by(compound_name, AKT3_expr_outlier_flag, dose) %>%
-  summarize(median_lfc = median(rep_collapsed_lfc),
-            mean_lfc = mean(rep_collapsed_lfc),
-            sd_lfc = sd(rep_collapsed_lfc)) %>%
-  filter(!is.na(compound_name))
-d.phase2_dose_response_AKTi_only_expr_summ
-
-```
-
-```{r}
-
-## check how many expr outlier high cell lines there are
-d.phase2_dose_response_AKTi_only_expr %>%
-  filter(AKT3_expr_outlier_flag == "high") %>%
-  distinct(depmap_id) %>%
-  nrow()
-
-## only 1 => remove from analysis
-d.phase2_dose_response_AKTi_only_expr_summ_plot <- d.phase2_dose_response_AKTi_only_expr_summ %>%
-  filter(AKT3_expr_outlier_flag != "high") %>%
-  mutate(AKT3_expr_outlier_flag = factor(AKT3_expr_outlier_flag, levels = c("low", "neither")))
-
-## plot dose response curves
-ggplot(d.phase2_dose_response_AKTi_only_expr_summ_plot, 
-       aes(x = log2(dose), y = median_lfc, color = AKT3_expr_outlier_flag)) +
-  geom_point() +
-  geom_line() +
-  scale_color_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F")) +
-  theme_bw() +
-  theme(aspect.ratio = 0.8,
-        axis.text = element_text(color = "black"),
-        # axis.text.x = element_text(angle = 45, hjust=1),
-        axis.ticks = element_line(color = "black")) +
-  facet_wrap(~compound_name, scales = "free_y")
-
-ggplot(d.phase2_dose_response_AKTi_only_expr_summ_plot, 
-       aes(x = log2(dose), y = mean_lfc, color = AKT3_expr_outlier_flag)) +
-  geom_point() +
-  geom_line() +
-  geom_errorbar(aes(ymin = mean_lfc - sd_lfc, ymax = mean_lfc + sd_lfc), 
-                width = 1, position = position_dodge(0.05)) +
-  scale_color_manual(values = c("low" = "#0080C6", "neither" = "#7F7F7F")) +
-  theme_bw() +
-  theme(aspect.ratio = 0.8,
-        axis.text = element_text(color = "black"),
-        # axis.text.x = element_text(angle = 45, hjust=1),
-        axis.ticks = element_line(color = "black")) +
-  facet_wrap(~compound_name, scales = "free_y")
-# ggsave(file.path(out_dir, "AKT3_expr_vs_AKT3i_sensitivity_depmap_phase2_data_dose_response.png"), height = 6, width = 8)
-
-```
-
-```{r}
-
-## LUNG ONLY
-
-## add AKT3 expr info to dose response DF
-d.AKT3_expr
-
-expr
-# d.phase2_dose_response_AKTi_only_expr_lung <- 
-  d.phase2_auc_AKTi_only_AKT3_expr #%>%
-  # dplyr::select(depmap_id, AKT3_log_tpm, AKT3_expr_outlier_flag) %>%
-  # distinct(depmap_id, .keep_all = TRUE) %>%
-  # left_join(d.phase2_dose_response_AKTi_only_long, by = "depmap_id")
-# d.phase2_dose_response_AKTi_only_expr_lung
-
-# ## add drug names to dose response DF
-# d.phase2_dose_response_AKTi_only_expr <- d.Broad_drug_info %>%
-#   rename(compound_id = broad_id, compound_name = name) %>%
-#   dplyr::select(compound_id, compound_name) %>%
-#   right_join(d.phase2_dose_response_AKTi_only_expr, by = "compound_id")
-# 
-# ## calculate median LFC 
-# d.phase2_dose_response_AKTi_only_expr_summ <- d.phase2_dose_response_AKTi_only_expr %>%
-#   group_by(compound_name, AKT3_expr_outlier_flag, dose) %>%
-#   summarize(median_lfc = median(rep_collapsed_lfc),
-#             mean_lfc = mean(rep_collapsed_lfc),
-#             sd_lfc = sd(rep_collapsed_lfc)) %>%
-#   filter(!is.na(compound_name))
-# d.phase2_dose_response_AKTi_only_expr_summ
-
-```
-
-
-
-
-
-
+There may be a correlation between low *AKT3* expression and TCGA hotspot mutations in *PIK3CA*, but there are still plenty of *AKT3*-low outlier cell lines that do not have *PIK3CA* hotspot mutations, so this likely isn't the only contributor to this effect. 

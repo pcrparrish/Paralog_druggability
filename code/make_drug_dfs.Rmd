@@ -1,5 +1,5 @@
 ---
-title: "make_drug_dfs"
+title: "Integrate drug sensitivity, copy number, and expression datasets"
 author: "Phoebe Parrish"
 date: "2023-09-10"
 output: html_document
@@ -7,13 +7,13 @@ output: html_document
 
 # Setup
 
-```{r setup, results='hide', message=FALSE, warning=FALSE}
+```{r setup, include=FALSE, results='hide', message=FALSE, warning=FALSE}
 
 library(biomaRt)
 library(depmap)
 library(ExperimentHub)
 library(tidyverse)
-library(tidylog)
+# library(tidylog)
 library(kableExtra)
 
 ```

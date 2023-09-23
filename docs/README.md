@@ -2,3 +2,4 @@ To preview the output from the Rmd files in the `/code/` folder, please visit th
 1. [integrating drug sensitivity, expression, and copy number datasets](https://pcrparrish.github.io/Paralog_druggability/make_drug_dfs.html)
 2. [proof-of-concept for expression analysis using known single-gene drug targets](https://htmlpreview.github.io/?https://pcrparrish.github.io/Paralog_druggability/expression_proof_of_concept.html)
 3. [synthetic lethal paralogs vs. drug sensitivity](https://htmlpreview.github.io/?https://pcrparrish.github.io/Paralog_druggability/SL_paralog_expr_vs_drug_sensitivity.html)
+4. [determine whether copy number or mutation status is influencing *AKT3* expression levels](https://htmlpreview.github.io/?https://pcrparrish.github.io/Paralog_druggability/AKT3_expr_covariate_analysis.html)
